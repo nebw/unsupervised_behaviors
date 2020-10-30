@@ -90,9 +90,15 @@ def get_image_and_mask_for_detections(
         body_mask_width_px (int, optional): Width of body mask ellipsoid. Defaults to 60.
 
     Returns:
-         Tuple[np.array]: Extracted image regions, tag masks, and combined body
-         and tag masks.
+         Tuple[np.array]: Extracted image regions, tag masks, and body masks.
     """
+
+    def rotate_crop_zoom(image, rotation_deg):
+        crop = image_crop_px
+        image = skimage.transform.rotate(image, rotation_deg)
+        image = scipy.ndimage.zoom(image[crop:-crop, crop:-crop], image_zoom_factor, order=1)
+        return image
+
     assert video_path or video_manager
 
     if not video_manager:
@@ -106,8 +112,8 @@ def get_image_and_mask_for_detections(
     ]
 
     images = []
-    masks = []
-    loss_masks = []
+    tag_masks = []
+    body_masks = []
 
     for _, frame_detections in tqdm.tqdm(
         detections.groupby("timestamp"), total=detections.timestamp.nunique()
@@ -127,61 +133,44 @@ def get_image_and_mask_for_detections(
             center_y = row.y_pos - np.sin(row.orientation) * bee_body_center_offset_px
             center_x = row.x_pos - np.cos(row.orientation) * bee_body_center_offset_px
             center = np.array((center_x, center_y))
+            rotation_deg = (1 / (2 * np.pi)) * 360 * (row.orientation - np.pi / 2 + np.pi)
 
             image = bb_behavior.utils.images.get_crop_from_image(
                 center, frame, width=image_size_px, clahe=False
             )
-            loss_mask = np.zeros_like(frame)
-            loss_mask[
-                skimage.draw.ellipse(
-                    center_y,
-                    center_x,
-                    body_mask_length_px,
-                    body_mask_width_px,
-                    rotation=-(row.orientation - np.pi / 2),
-                    shape=frame.shape,
-                )
-            ] = 1
-            image_mask = (
+            image = (rotate_crop_zoom(image, rotation_deg) * 255).astype(np.uint8)
+            images.append(image)
+
+            task_mask = (
                 bb_behavior.utils.images.get_crop_from_image(
                     center, tag_mask, width=image_size_px, clahe=False
                 )
                 == 255
             )
-            loss_mask = (
+            task_mask = rotate_crop_zoom(task_mask, rotation_deg) > 0.5
+            tag_masks.append(task_mask)
+
+            body_mask = np.zeros_like(frame)
+            body_coords = skimage.draw.ellipse(
+                center_y,
+                center_x,
+                body_mask_length_px,
+                body_mask_width_px,
+                rotation=-(row.orientation - np.pi / 2),
+                shape=frame.shape,
+            )
+            body_mask[body_coords] = 1
+            body_mask = (
                 bb_behavior.utils.images.get_crop_from_image(
-                    center, loss_mask, width=256, clahe=False
+                    center, body_mask, width=image_size_px, clahe=False
                 )
                 == 255
             )
-
-            rotation_deg = (1 / (2 * np.pi)) * 360 * (row.orientation - np.pi / 2 + np.pi)
-            image = skimage.transform.rotate(image, rotation_deg)
-            image_mask = skimage.transform.rotate(image_mask, rotation_deg)
-            loss_mask = skimage.transform.rotate(loss_mask, rotation_deg)
-
-            crop = image_crop_px
-            images.append(
-                (
-                    scipy.ndimage.zoom(image[crop:-crop, crop:-crop], image_zoom_factor, order=1)
-                    * 255
-                ).astype(np.uint8)
-            )
-            masks.append(
-                scipy.ndimage.zoom(image_mask[crop:-crop, crop:-crop], image_zoom_factor, order=1)
-                > 0.5
-            )
-            loss_masks.append(
-                scipy.ndimage.zoom(
-                    loss_mask[crop:-crop, crop:-crop] * image_mask[crop:-crop, crop:-crop],
-                    image_zoom_factor,
-                    order=1,
-                )
-                > 0.5
-            )
+            body_mask = rotate_crop_zoom(body_mask, rotation_deg) > 0.5
+            body_masks.append(body_mask)
 
     images = np.stack(images)
-    masks = np.stack(masks)
-    loss_masks = np.stack(loss_masks)
+    tag_masks = np.stack(tag_masks)
+    body_masks = np.stack(body_masks)
 
-    return images, masks, loss_masks
+    return images, tag_masks, body_masks
