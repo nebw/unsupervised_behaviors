@@ -22,9 +22,11 @@ setuptools.setup(
     python_requires=">=3.6",
     install_requires=[
         "numpy",
+        "pandas",
+        "scikit-image",
+        "scikit-learn",
         "torch",
         "torchvision",
-        "scikit-learn",
         "bb_behavior @ git+ssh://git@github.com/BioroboticsLab/bb_behavior.git#egg=master",
         "bb_tracking @ git+ssh://git@github.com/walachey/bb_tracking.git#egg=master",
         "hierarchical_vae @ git+ssh://git@github.com/nebw/hierarchical_vae.git#egg=master",
