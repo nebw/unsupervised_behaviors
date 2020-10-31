@@ -1,3 +1,4 @@
+import datetime
 import decimal
 import pathlib
 from typing import Set, Tuple
@@ -53,6 +54,35 @@ def get_random_initial_frames(num_frames: int) -> Set[decimal.Decimal]:
         )
 
     return set(frame_df.frame_id)
+
+
+def get_inital_frame_pair_dataframe(date: datetime.date, cam_id: int) -> pd.DataFrame:
+    """Get dataframe with first two frames of all videos for given date.
+
+    Args:
+        date (datetime.date): Date for which to fetch frames.
+        cam_id (int): Only fetch frames from this camera.
+
+    Returns:
+        pd.DataFrame: Dataframe with entries from frame metadata table for
+        requested date.
+    """
+    with bb_behavior.db.get_database_connection() as con:
+        frame_df = pd.read_sql(
+            f"""
+                SELECT * FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                WHERE index < 2
+                AND datetime >= %s
+                AND datetime < %s
+                AND cam_id = {cam_id}
+            """,
+            con,
+            parse_dates=True,
+            coerce_float=False,
+            params=(date, date + datetime.timedelta(hours=24)),
+        )
+
+    return frame_df
 
 
 def get_image_and_mask_for_detections(
