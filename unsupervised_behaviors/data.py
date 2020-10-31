@@ -64,7 +64,7 @@ def get_image_and_mask_for_detections(
     use_clahe: bool = True,
     clahe_kernel_size_px: int = 25,
     tag_mask_size_px: int = 18,
-    bee_body_center_offset_px: int = 20,
+    body_center_offset_px: int = 20,
     body_mask_length_px: int = 100,
     body_mask_width_px: int = 60,
 ) -> Tuple[np.array, np.array, np.array]:
@@ -83,7 +83,7 @@ def get_image_and_mask_for_detections(
         use_clahe (bool, optional): Process entire frame using CLAHE. Defaults to True.
         clahe_kernel_size_px (int, optional): Kernel size for CLAHE. Defaults to 25.
         tag_mask_size_px (int, optional): Radius of tag mask. Defaults to 18.
-        bee_body_center_offset_px (int, optional): Offset from tag to body center. Defaults to 20.
+        body_center_offset_px (int, optional): Offset from tag to body center. Defaults to 20.
         body_mask_length_px (int, optional): Length of body mask ellipsoid. Defaults to 100.
         body_mask_width_px (int, optional): Width of body mask ellipsoid. Defaults to 60.
 
@@ -122,8 +122,8 @@ def get_image_and_mask_for_detections(
             ] = 0
 
         for _, row in frame_detections.iterrows():
-            center_y = row.y_pos - np.sin(row.orientation) * bee_body_center_offset_px
-            center_x = row.x_pos - np.cos(row.orientation) * bee_body_center_offset_px
+            center_y = row.y_pos - np.sin(row.orientation) * body_center_offset_px
+            center_x = row.x_pos - np.cos(row.orientation) * body_center_offset_px
             center = np.array((center_x, center_y))
             rotation_deg = (1 / (2 * np.pi)) * 360 * (row.orientation - np.pi / 2 + np.pi)
 
