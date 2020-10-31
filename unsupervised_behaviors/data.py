@@ -68,7 +68,7 @@ def get_image_and_mask_for_detections(
     bee_body_center_offset_px: int = 20,
     body_mask_length_px: int = 100,
     body_mask_width_px: int = 60,
-) -> Tuple[np.array]:
+) -> Tuple[np.array, np.array, np.array]:
     """Fetch image regions from raw BeesBook videos centered on detections of
        tagged bees. Automatically generates loss masks for ellipsoid region
        around bee based on body orientation and tags of all individuals visible
@@ -90,7 +90,7 @@ def get_image_and_mask_for_detections(
         body_mask_width_px (int, optional): Width of body mask ellipsoid. Defaults to 60.
 
     Returns:
-         Tuple[np.array]: Extracted image regions, tag masks, and body masks.
+         Tuple[np.array, np.array, np.array]: Extracted image regions, tag masks, and body masks.
     """
 
     def rotate_crop_zoom(image, rotation_deg):
