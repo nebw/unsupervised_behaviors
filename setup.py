@@ -30,5 +30,6 @@ setuptools.setup(
         "bb_behavior @ git+ssh://git@github.com/BioroboticsLab/bb_behavior.git#egg=master",
         "bb_tracking @ git+ssh://git@github.com/walachey/bb_tracking.git#egg=master",
         "hierarchical_vae @ git+ssh://git@github.com/nebw/hierarchical_vae.git#egg=master",
+        "pipeline @ git+ssh://git@github.com/BioroboticsLab/bb_pipeline.git#egg=master",
     ],
 )
