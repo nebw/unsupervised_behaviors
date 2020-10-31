@@ -57,8 +57,7 @@ def get_random_initial_frames(num_frames: int) -> Set[decimal.Decimal]:
 
 def get_image_and_mask_for_detections(
     detections: pd.DataFrame,
-    video_path: pathlib.Path = None,
-    video_manager: bb_behavior.io.videos.BeesbookVideoManager = None,
+    video_manager: bb_behavior.io.videos.BeesbookVideoManager,
     image_size_px: int = 256,
     image_crop_px: int = 32,
     image_zoom_factor: float = 2 / 3,
@@ -77,8 +76,7 @@ def get_image_and_mask_for_detections(
 
     Args:
         detections (pd.DataFrame): Dataframe with detections.
-        video_path (pathlib.Path, optional): Path to BeesBook video data. Defaults to None.
-        video_manager (bb_behavior.io.videos.BeesbookVideoManager, optional): Defaults to None.
+        video_manager (bb_behavior.io.videos.BeesbookVideoManager): Video cache.
         image_size_px (int, optional): Initial image region size. Defaults to 256.
         image_crop_px (int, optional): Crop after rotation. Defaults to 32.
         image_zoom_factor (float, optional): Zoom factor after rotation. Defaults to 2/3.
@@ -99,13 +97,7 @@ def get_image_and_mask_for_detections(
         image = scipy.ndimage.zoom(image[crop:-crop, crop:-crop], image_zoom_factor, order=1)
         return image
 
-    assert video_path or video_manager
-
-    if not video_manager:
-        video_manager = bb_behavior.io.videos.BeesbookVideoManager(
-            str(video_path), "/home/ben/tmp/video_manager_cache/"
-        )
-        video_manager.cache_frames(detections.frame_id.unique())
+    video_manager.cache_frames(detections.frame_id.unique())
 
     detections = detections[
         detections.detection_type == bb_tracking.types.DetectionType.TaggedBee.value
