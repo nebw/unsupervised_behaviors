@@ -1,3 +1,5 @@
+from typing import Tuple, Iterable
+
 import numpy as np
 import pandas as pd
 import tqdm.auto as tqdm
@@ -6,7 +8,6 @@ import scipy.ndimage
 import skimage
 import skimage.draw
 import skimage.morphology
-from typing import Tuple
 
 import bb_behavior
 import bb_behavior.db
@@ -18,7 +19,14 @@ import pipeline
 from unsupervised_behaviors import utils
 
 
-def get_saliency_pipeline():
+def get_saliency_pipeline() -> Tuple[pipeline.Pipeline, Iterable[str]]:
+    """Get pipeline with saliency localizer and list of class labels
+
+    Returns
+    -------
+    Tuple[pipeline.Pipeline, list[str]]:
+        Pipeline and a list with labels for each layer of the localizer output.
+    """
     saliency_pipeline = pipeline.Pipeline(
         [pipeline.objects.Image],
         [pipeline.objects.SaliencyImages],
@@ -42,28 +50,30 @@ def get_background_histogram(
     """Extract "smart" background image histogram from frames in frame_df by
        selecting pixels with low movement, and no detections of bees for each frame.
 
-    Args:
-        frame_df (pd.DataFrame):
-            DataFrame obtained via data.get_inital_frame_pair_dataframe.
-        video_manager (bb_behavior.io.videos.BeesbookVideoManager):
-            Video cache.
-        diff_threshold (float):
-            Maximum euclidean distance in image differential. Defaults to 1e-3.
-        saliency_threshold (float, optional):
-            Maximum localizer saliency. Defaults to 0.1.
-        dilation_kernel_size (int, optional):
-            Localizer saliency kernel size. Defaults to 6.
-        body_center_offset_px (int, optional):
-            Offset from tag to body center. Defaults to 20.
-        body_mask_length_px (int, optional):
-            Length of body mask ellipsoid. Defaults to 100.
-        body_mask_width_px (int, optional):
-            Width of body mask ellipsoid. Defaults to 60.
+    Parameters
+    ----------
+    frame_df : pd.DataFrame
+        DataFrame obtained via data.get_inital_frame_pair_dataframe.
+    video_manager : bb_behavior.io.videos.BeesbookVideoManager
+        Video cache.
+    diff_threshold : float, optional
+        Maximum euclidean distance in image differential. Defaults to 1e-3.
+    saliency_threshold : float, optional
+        Maximum localizer saliency. Defaults to 0.1.
+    dilation_kernel_size : int, optional
+        Localizer saliency kernel size. Defaults to 6.
+    body_center_offset_px : int, optional
+        Offset from tag to body center. Defaults to 20.
+    body_mask_length_px : int, optional
+        Length of body mask ellipsoid. Defaults to 100.
+    body_mask_width_px : int, optional
+        Width of body mask ellipsoid. Defaults to 60.
 
-    Returns:
-        Tuple[np.array, np.array]: Sum and counts of background pixels.
+    Returns
+    -------
+    Tuple[np.array, np.array]
+        Sum and counts of background pixels.
     """
-
     video_manager.cache_frames(frame_df.frame_id.unique())
     saliency_pipeline, class_labels = get_saliency_pipeline()
 
