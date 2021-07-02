@@ -157,6 +157,7 @@ def get_image_and_mask_for_detections(
     images = []
     tag_masks = []
     body_masks = []
+    rows = []
 
     for _, frame_detections in tqdm.tqdm(
         detections.groupby("timestamp"), total=detections.timestamp.nunique()
@@ -212,8 +213,11 @@ def get_image_and_mask_for_detections(
             body_mask = rotate_crop_zoom(body_mask, rotation_deg) > 0.5
             body_masks.append(body_mask)
 
+            rows.append(row.values)
+
     images = np.stack(images)
     tag_masks = np.stack(tag_masks)
     body_masks = np.stack(body_masks)
+    detections = pd.DataFrame(np.stack(rows), columns=detections.columns)
 
-    return images, tag_masks, body_masks
+    return images, tag_masks, body_masks, detections
