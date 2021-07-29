@@ -139,6 +139,74 @@ def get_random_fc_ids(num_fcs: int) -> Set[decimal.Decimal]:
     return set(fc_df.fc_id)
 
 
+def get_full_track_detections(fc_id: decimal.Decimal, num_frames: int) -> pd.DataFrame:
+    """Get all detections from bees that have detections on all first `num_frames` frames of the
+    video with id `fc_id`.
+
+    Parameters
+    ----------
+    fc_id : decimal.Decimal
+        Framecontainer ID to get detections from
+    num_frames : int
+        Number of initial frames in Framecontainer to consider
+
+    Returns
+    -------
+    pd.DataFrame
+        Detections from the given Framecontainer
+    """
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        # return track_ids of all tracks in this frame container with a detection in each of the
+        # first `num_frames` frames
+        track_df = pd.read_sql(
+            f"""
+            SELECT track_id FROM (
+                SELECT DISTINCT(track_id), COUNT(track_id) AS NUM_DETECTIONS FROM (
+                    SELECT frame_id
+                    FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                    WHERE fc_id = {fc_id}
+                    ORDER BY index
+                    LIMIT {num_frames}
+                ) frame_query
+                JOIN {bb_behavior.db.get_detections_tablename()} AS D
+                ON frame_query.frame_id = D.frame_id
+                GROUP BY track_id
+            ) track_query
+            WHERE NUM_DETECTIONS = {num_frames}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+        # frame_ids of the same first `num_frames` frames
+        frame_df = pd.read_sql(
+            f"""
+            SELECT frame_id
+            FROM {bb_behavior.db.get_frame_metadata_tablename()}
+            WHERE fc_id = {fc_id}
+            ORDER BY index
+            LIMIT {num_frames}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+        # all detections from the previously selected frames and tracks
+        detection_df = pd.read_sql(
+            f"""
+            SELECT *
+            FROM {bb_behavior.db.get_detections_tablename()}
+            WHERE
+                track_id IN {tuple(map(int, track_df.track_id))} AND
+                frame_id IN {tuple(map(int, frame_df.frame_id))}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+        return detection_df
+
+
 def get_image_and_mask_for_detections(
     detections: pd.DataFrame,
     video_manager: bb_behavior.io.videos.BeesbookVideoManager,
