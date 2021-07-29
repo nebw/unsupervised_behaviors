@@ -130,7 +130,7 @@ def get_random_fc_ids(num_fcs: int) -> Set[decimal.Decimal]:
                         FROM {bb_behavior.db.get_detections_tablename()}
                     )
                 ORDER BY RANDOM()
-                LIMIT 5
+                LIMIT {num_fcs}
             """,
             coerce_float=False,
             con=con,
