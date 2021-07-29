@@ -21,6 +21,9 @@ import bb_tracking
 import bb_tracking.types
 
 
+APPLICATION_NAME = "unsupervised_behaviors"
+
+
 def get_random_initial_frames(num_frames: int) -> Set[decimal.Decimal]:
     """Get a random sample of frame_ids at the beginning of source video files
        for the period in which detections exist in the database.
@@ -35,7 +38,7 @@ def get_random_initial_frames(num_frames: int) -> Set[decimal.Decimal]:
     Set[decimal.Decimal]
         frame_ids of sampled frames
     """
-    with bb_behavior.db.get_database_connection(application_name="unsupervised_behaviors") as con:
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
         frame_df = pd.read_sql(
             f"""
                 SELECT frame_id FROM {bb_behavior.db.get_frame_metadata_tablename()}
@@ -74,7 +77,7 @@ def get_inital_frame_pair_dataframe(date: datetime.date, cam_id: int) -> pd.Data
         [description]
         Dataframe with entries from frame metadata table for requested date.
     """
-    with bb_behavior.db.get_database_connection() as con:
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
         frame_df = pd.read_sql(
             f"""
                 SELECT * FROM {bb_behavior.db.get_frame_metadata_tablename()}
@@ -90,6 +93,50 @@ def get_inital_frame_pair_dataframe(date: datetime.date, cam_id: int) -> pd.Data
         )
 
     return frame_df
+
+
+def get_random_fc_ids(num_fcs: int) -> Set[decimal.Decimal]:
+    """Get a random sample of framecontainer ids (corresponding to videos) for the period in which
+    detections exist in the database.
+
+    Parameters
+    ----------
+    num_fcs : int
+        Number of framecontainer ids to sample
+
+    Returns
+    -------
+    Set[decimal.Decimal]
+        ids of sampled videos
+    """
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        fc_df = pd.read_sql(
+            f"""
+                SELECT fc_id FROM (
+                    SELECT
+                        fc_id,
+                        MIN(datetime) AS MIN_TIMESTAMP,
+                        MAX(datetime) AS MAX_TIMESTAMP
+                    FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                    GROUP BY fc_id
+                ) subquery
+                WHERE
+                    MIN_TIMESTAMP >= (
+                        SELECT MIN(timestamp)
+                        FROM {bb_behavior.db.get_detections_tablename()}
+                    )
+                    AND MAX_TIMESTAMP <= (
+                        SELECT MAX(timestamp)
+                        FROM {bb_behavior.db.get_detections_tablename()}
+                    )
+                ORDER BY RANDOM()
+                LIMIT 5
+            """,
+            coerce_float=False,
+            con=con,
+        )
+
+    return set(fc_df.fc_id)
 
 
 def get_image_and_mask_for_detections(
