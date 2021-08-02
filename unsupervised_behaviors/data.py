@@ -253,8 +253,9 @@ def get_image_and_mask_for_detections(
 
     Returns
     -------
-    Tuple[np.array, np.array, np.array]
-        Extracted image regions, tag masks, and body masks.
+    Tuple[np.array, np.array, np.array, pd.DataFrame]
+        Extracted image regions, tag masks, body masks, and a dataframe with detections in the
+        same order as the images and masks.
     """
 
     def rotate_crop_zoom(image: np.array, rotation_deg: float) -> np.array:
