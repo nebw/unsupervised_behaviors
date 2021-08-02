@@ -9,7 +9,7 @@ import skimage
 import skimage.draw
 import skimage.exposure
 import skimage.transform
-import tqdm.tqdm as tqdm
+import tqdm
 import pandas as pd
 
 import bb_behavior
