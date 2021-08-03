@@ -2,8 +2,10 @@ import datetime
 import decimal
 import itertools
 import pathlib
+import sys
 from typing import Set, Tuple, Iterable
 
+import joblib
 import h5py
 import numpy as np
 import scipy
@@ -12,6 +14,7 @@ import skimage
 import skimage.draw
 import skimage.exposure
 import skimage.transform
+import skimage.io
 import skvideo
 import skvideo.io
 import tqdm
@@ -226,6 +229,7 @@ def get_image_and_mask_for_detections(
     body_center_offset_px: int = 20,
     body_mask_length_px: int = 100,
     body_mask_width_px: int = 60,
+    n_jobs: int = -1,
 ) -> Tuple[np.array, np.array, np.array]:
     """Fetch image regions from raw BeesBook videos centered on detections of
        tagged bees. Automatically generates loss masks for ellipsoid region
@@ -257,6 +261,8 @@ def get_image_and_mask_for_detections(
         Length of body mask ellipsoid. Defaults to 100.
     body_mask_width_px : int, optional
         Width of body mask ellipsoid. Defaults to 60.
+    n_jobs : int, optional
+        Number of parallel jobs for processing.
 
     Returns
     -------
@@ -271,22 +277,16 @@ def get_image_and_mask_for_detections(
         image = scipy.ndimage.zoom(image[crop:-crop, crop:-crop], image_zoom_factor, order=1)
         return image
 
-    video_manager.cache_frames(detections.frame_id.unique())
+    def extract_images(
+        frame_detections: pd.DataFrame, frame_path: str
+    ) -> Tuple[np.array, np.array, np.array, np.array]:
+        images = []
+        tag_masks = []
+        body_masks = []
+        rows = []
 
-    detections = detections[
-        detections.detection_type == bb_tracking.types.DetectionType.TaggedBee.value
-    ]
+        frame = skimage.io.imread(frame_path, as_gray=True, plugin="matplotlib")
 
-    images = []
-    tag_masks = []
-    body_masks = []
-    rows = []
-
-    for _, frame_detections in tqdm.tqdm(
-        detections.groupby("timestamp"), total=detections.timestamp.nunique()
-    ):
-        assert frame_detections.frame_id.nunique() == 1
-        frame = video_manager.get_frame(frame_detections.frame_id.iloc[0])
         if use_clahe:
             frame = skimage.exposure.equalize_adapthist(frame, clahe_kernel_size_px)
 
@@ -337,6 +337,38 @@ def get_image_and_mask_for_detections(
             body_masks.append(body_mask)
 
             rows.append(row.values)
+
+        return images, tag_masks, body_masks, rows
+
+    video_manager.cache_frames(detections.frame_id.unique())
+
+    detections = detections[
+        detections.detection_type == bb_tracking.types.DetectionType.TaggedBee.value
+    ]
+
+    images = []
+    tag_masks = []
+    body_masks = []
+    rows = []
+
+    detections_by_frame = detections.groupby("timestamp")
+
+    # preload file paths because video_manager can't be used in parallel.
+    frame_paths = []
+    for _, frame_detections in detections_by_frame:
+        assert frame_detections.frame_id.nunique() == 1
+        frame_paths.append(video_manager.get_frame_id_path(frame_detections.frame_id.iloc[0]))
+
+    parallel = joblib.Parallel(prefer="processes", n_jobs=n_jobs)(
+        joblib.delayed(extract_images)(frame_detections, frame_path)
+        for (_, frame_detections), frame_path in zip(detections_by_frame, frame_paths)
+    )
+
+    for results in parallel:
+        images += results[0]
+        tag_masks += results[1]
+        body_masks += results[2]
+        rows += results[3]
 
     images = np.stack(images)
     tag_masks = np.stack(tag_masks)
@@ -536,6 +568,7 @@ def load_and_store_videos(
     use_clahe: bool = True,
     clear_video_cache: bool = True,
     verbose: bool = True,
+    n_jobs: int = -1,
 ) -> None:
     """For each trajectory, load images and masks and store them in the given h5 file.
 
@@ -558,8 +591,10 @@ def load_and_store_videos(
         Process entire frame using CLAHE. Defaults to True.
     clear_video_cache: bool, optional
         Clear video cache at end of processing.
-    verbose: bool = True
+    verbose: bool, optional
         Print total number of loaded videos after each trajectory interval.
+    n_jobs : int, optional
+        Number of parallel jobs for processing.
     """
     with h5py.File(h5_path, "r+") as f:
         images_dset = f["images"]
@@ -573,12 +608,9 @@ def load_and_store_videos(
             video_manager.cache_frames(all_frame_ids)
             detection_df = convert_bb_behavior_trajectories(results)
 
-            (
-                images,
-                masks,
-                loss_masks,
-                detection_df,
-            ) = get_image_and_mask_for_detections(detection_df, video_manager, use_clahe=use_clahe)
+            (images, masks, loss_masks, detection_df,) = get_image_and_mask_for_detections(
+                detection_df, video_manager, use_clahe=use_clahe, n_jobs=n_jobs
+            )
 
             for video_idx, group in detection_df.groupby("video_idx"):
                 idxs = group.sort_values("timestamp").index.values
@@ -595,12 +627,12 @@ def load_and_store_videos(
                         video_manager.clear_video_cache()
 
                     if verbose:
-                        print(f"Loaded {idx}/{to_idx} videos.")
+                        sys.stdout.write(f"\rLoaded {idx}/{to_idx} videos.")
 
                     return
 
             if verbose:
-                print(f"Loaded {idx}/{to_idx} videos.")
+                sys.stdout.write(f"\rLoaded {idx}/{to_idx} videos.")
 
 
 def extract_video(h5_path: pathlib.Path, video_idx: int, output_path: pathlib.Path):
