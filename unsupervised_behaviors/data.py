@@ -1,6 +1,5 @@
 import datetime
 import decimal
-import itertools
 import pathlib
 import sys
 from typing import Set, Tuple, Iterable
@@ -17,7 +16,6 @@ import skimage.transform
 import skimage.io
 import skvideo
 import skvideo.io
-import tqdm
 import pandas as pd
 
 import bb_behavior
@@ -405,13 +403,60 @@ def get_frequent_intervals(
     return frequent_intervals
 
 
-def get_trajectory_generator(
+def convert_bb_behavior_trajectories(
+    results: Iterable[Tuple[np.array, np.array, int]]
+) -> pd.DataFrame:
+    """Convert trajectories as returned by `get_event_detection_trajectory_generator` into a
+    DataFrame that can be used by `get_image_and_mask_for_detections`. This is necessary because
+    `get_image_and_mask_for_detections` iterates over frames instead of trajectories to avoid
+    unnecessarily loading the same image twice.
+
+    Parameters
+    ----------
+    results: Iterable[Tuple[np.array, np.array, int]]
+        Trajectory generator as returned by `get_event_detection_trajectory_generator`.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with all detections from the trajectories, with column `video_idx` as a sequential
+        index of the trajectory.
+    """
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        detections = []
+        for idx, (frame_ids, traj, bee_id) in enumerate(results):
+            frames = pd.read_sql(
+                f"""
+                SELECT frame_id, timestamp, cam_id
+                FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                WHERE
+                    frame_id IN {tuple(frame_ids)}
+                """,
+                con=con,
+                coerce_float=False,
+            )
+            trajectory_df = pd.DataFrame(traj, columns=("x_pos", "y_pos", "orientation"))
+            trajectory_df["frame_id"] = frame_ids
+            trajectory_df["bee_id"] = bee_id
+            trajectory_df["detection_type"] = bb_tracking.types.DetectionType.TaggedBee.value
+            trajectory_df["video_idx"] = idx
+
+            trajectory_df = trajectory_df.merge(frames, on="frame_id")
+
+            detections.append(trajectory_df)
+
+        detection_df = pd.concat(detections)
+
+        return detection_df
+
+
+def get_event_detection_trajectory_generator(
     events_df: pd.DataFrame,
     timestamps: Iterable[Tuple[int, np.datetime64]],
     num_frames_around: int,
     min_proportion_detected: float,
     duration: datetime.timedelta = datetime.timedelta(minutes=1),
-) -> Iterable[Tuple[np.array, np.array, int]]:
+) -> Iterable[pd.DataFrame]:
     """Given intervals (from get_frequent_intervals), yield consistent trajectories (position,
     orientation, frame_id) of event individuals (e.g. dancing bees). Optionaly filter by proportion
     of detections, e.g. only return trajectory if all frames have a detection. Interpolate missing
@@ -434,9 +479,8 @@ def get_trajectory_generator(
 
     Returns
     -------
-    Iterable[Tuple[np.array, np.array, int]]
-        Generator with one tuple for each trajectory [frame_ids, [x_pos, y_pos, orientation],
-        bee_id].
+    Iterable[pd.DataFrame]
+        Generator of DataFrames with positions, orientations, frame and track IDs.
     """
     with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
         for cam_id, timestamp in timestamps:
@@ -486,54 +530,7 @@ def get_trajectory_generator(
                 if np.mean(mask) >= min_proportion_detected:
                     results.append((frame_ids, traj, event.bee_id))
 
-            yield results
-
-
-def convert_bb_behavior_trajectories(
-    results: Iterable[Tuple[np.array, np.array, int]]
-) -> pd.DataFrame:
-    """Convert trajectories as returned by `get_trajectory_generator` into a DataFrame that can be
-    used by `get_image_and_mask_for_detections`. This is necessary because
-    `get_image_and_mask_for_detections` iterates over frames instead of trajectories to avoid
-    unnecessarily loading the same image twice.
-
-    Parameters
-    ----------
-    results: Iterable[Tuple[np.array, np.array, int]]
-        Trajectory generator as returned by `get_trajectory_generator`.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with all detections from the trajectories, with column `video_idx` as a sequential
-        index of the trajectory.
-    """
-    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
-        detections = []
-        for idx, (frame_ids, traj, bee_id) in enumerate(results):
-            frames = pd.read_sql(
-                f"""
-                SELECT frame_id, timestamp, cam_id
-                FROM {bb_behavior.db.get_frame_metadata_tablename()}
-                WHERE
-                    frame_id IN {tuple(frame_ids)}
-                """,
-                con=con,
-                coerce_float=False,
-            )
-            trajectory_df = pd.DataFrame(traj, columns=("x_pos", "y_pos", "orientation"))
-            trajectory_df["frame_id"] = frame_ids
-            trajectory_df["bee_id"] = bee_id
-            trajectory_df["detection_type"] = bb_tracking.types.DetectionType.TaggedBee.value
-            trajectory_df["video_idx"] = idx
-
-            trajectory_df = trajectory_df.merge(frames, on="frame_id")
-
-            detections.append(trajectory_df)
-
-        detection_df = pd.concat(detections)
-
-        return detection_df
+            yield convert_bb_behavior_trajectories(results)
 
 
 def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: int):
@@ -558,9 +555,108 @@ def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: i
         f.create_dataset("labels", (num_videos,), dtype=bool)
 
 
+def get_track_detections_from_frame_container(fc_id: decimal.Decimal, num_frames: int):
+    """Retrieve a dataframe with detections from consistent tracks at the beginning of the
+    framecontainer with the given ID. I.e., the DataFrame will contain detections of all individuals
+    in the initial frames of the video that have detection in each frame.
+
+    Parameters
+    ----------
+    fc_id: decimal.Decimal
+        Framecontainer ID.
+    num_frames: int
+        Number of initial frames to extract.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with positions, orientations, frame and track IDs.
+    """
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        # return track_ids of all tracks in this frame container with a detection in each of the
+        # first `num_frames` frames
+        track_df = pd.read_sql(
+            f"""
+            SELECT track_id FROM (
+                SELECT DISTINCT(track_id), COUNT(track_id) AS NUM_DETECTIONS FROM (
+                    SELECT frame_id
+                    FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                    WHERE fc_id = {fc_id}
+                    ORDER BY index
+                    LIMIT {num_frames}
+                ) frame_query
+                JOIN {bb_behavior.db.get_detections_tablename()} AS D
+                ON frame_query.frame_id = D.frame_id
+                    AND D.detection_type = {bb_tracking.types.DetectionType.TaggedBee.value}
+                GROUP BY track_id
+            ) track_query
+            WHERE NUM_DETECTIONS = {num_frames}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+        # frame_ids of the same first `num_frames` frames
+        frame_df = pd.read_sql(
+            f"""
+            SELECT frame_id
+            FROM {bb_behavior.db.get_frame_metadata_tablename()}
+            WHERE fc_id = {fc_id}
+            ORDER BY index
+            LIMIT {num_frames}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+        # all detections from the previously selected frames and tracks, i.e. all detections from bees
+        # that have detections on all first `num_frames` frames of the video with id `fc_id`
+        detection_df = pd.read_sql(
+            f"""
+            SELECT *
+            FROM {bb_behavior.db.get_detections_tablename()}
+            WHERE
+                track_id IN {tuple(map(int, track_df.track_id))} AND
+                frame_id IN {tuple(map(int, frame_df.frame_id))}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
+    return detection_df
+
+
+def get_random_detection_trajectory_generator(
+    num_frames: int, num_cache_fc_ids: int = 100
+) -> Iterable[pd.DataFrame]:
+    """Yield consistent trajectories (position, orientation, frame_id) of individuals. Select
+    trajectories from initial frames from frame containers such that as few frames as possible need
+    to be decoded and processed.
+
+    Parameters
+    ----------
+    num_frames: int
+        Number of frames per video
+    num_cache_fc_ids: int
+        Size of framecontainer ID cache. Selecting a random ID from the database is rather slow,
+        therefore we precache a number of IDs at once.
+
+    Returns
+    -------
+    Iterable[pd.DataFrame]
+        Generator of DataFrames with positions, orientations, frame and track IDs.
+    """
+    fc_ids = set()
+    while True:
+        if not len(fc_ids):
+            fc_ids.update(unsupervised_behaviors.data.get_random_fc_ids(num_cache_fc_ids))
+
+        yield get_track_detections_from_frame_container(fc_ids.pop(), num_frames)
+
+
 def load_and_store_videos(
     h5_path: pathlib.Path,
-    trajectory_generator: Iterable[Tuple[np.array, np.array, int]],
+    trajectory_generator: Iterable[pd.DataFrame],
     label: unsupervised_behaviors.constants.DanceLabels,
     from_idx: int,
     to_idx: int,
@@ -576,8 +672,8 @@ def load_and_store_videos(
     ----------
     h5_path: pathlib.Path
         Output file path.
-    trajectory_generator: Iterable[Tuple[np.array, np.array, int]]
-        Trajectory generator as returned by `get_trajectory_generator`.
+    trajectory_generator: Iterable[pd.DataFrame]
+        Trajectory generator as returned by `get_*_detection_trajectory_generator`.
     label: unsupervised_behaviors.constants.DanceLabels
         Label of events returned by `trajectory_generator`.
     from_idx: int
@@ -603,16 +699,18 @@ def load_and_store_videos(
         labels_dset = f["labels"]
 
         idx = from_idx
-        for results in trajectory_generator:
-            all_frame_ids = set(itertools.chain(*[r[0] for r in results]))
+        for detection_df in trajectory_generator:
+            all_frame_ids = detection_df.frame_id.unique()
             video_manager.cache_frames(all_frame_ids)
-            detection_df = convert_bb_behavior_trajectories(results)
 
             (images, masks, loss_masks, detection_df,) = get_image_and_mask_for_detections(
                 detection_df, video_manager, use_clahe=use_clahe, n_jobs=n_jobs
             )
 
-            for video_idx, group in detection_df.groupby("video_idx"):
+            # if generator is event generator: video_idx, if random generator: track_id
+            group_column = "video_idx" if "video_idx" in detection_df.columns else "track_id"
+
+            for _, group in detection_df.groupby(group_column):
                 idxs = group.sort_values("timestamp").index.values
 
                 images_dset[idx, :] = images[idxs]
