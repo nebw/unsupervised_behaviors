@@ -1,5 +1,6 @@
 import datetime
 import decimal
+import logging
 import pathlib
 import sys
 from typing import Iterable, Set, Tuple
@@ -529,7 +530,10 @@ def get_event_detection_trajectory_generator(
                 if np.mean(mask) >= min_proportion_detected:
                     results.append((frame_ids, traj, event.bee_id))
 
-            yield convert_bb_behavior_trajectories(results)
+            try:
+                yield convert_bb_behavior_trajectories(results)
+            except Exception as err:
+                logging.getLogger().warning(f"Error loading event: {event} - {err}")
 
 
 def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: int):
