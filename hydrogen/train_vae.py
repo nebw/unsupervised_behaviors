@@ -4,24 +4,25 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
-# %% codecell
-import pathlib
 import datetime
 import io
+
+# %% codecell
+import pathlib
 import sys
-import h5py
 import time
 
-import numpy as np
-import pandas as pd
-import tqdm
-import torch
+import h5py
 import imageio
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
+import torch
+import tqdm
 
 import hierarchical_vae.hps as hps
-from hierarchical_vae.train_helpers import set_up_hyperparams, load_opt
+from hierarchical_vae.train_helpers import load_opt, set_up_hyperparams
 from hierarchical_vae.vae import VAE
 
 # %% codecell

@@ -1,10 +1,10 @@
 # %%
 import sys
 
-import numpy as np
-import pandas as pd
 import madgrad
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import torch
 
 from unsupervised_behaviors.cpc.model import ConvCPC

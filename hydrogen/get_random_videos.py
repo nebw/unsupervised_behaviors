@@ -3,6 +3,9 @@ import pathlib
 
 import pandas as pd
 
+import unsupervised_behaviors
+import unsupervised_behaviors.data as data
+
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
@@ -10,9 +13,6 @@ import bb_behavior.utils
 import bb_behavior.utils.images
 import bb_tracking
 import bb_tracking.types
-
-import unsupervised_behaviors
-import unsupervised_behaviors.data as data
 
 APPLICATION_NAME = "unsupervised_behaviors"
 
