@@ -1,22 +1,22 @@
-from typing import Tuple, Iterable
+from typing import Iterable, Tuple
 
 import numpy as np
 import pandas as pd
-import tqdm.auto as tqdm
+import pipeline
 import scipy
 import scipy.ndimage
 import skimage
 import skimage.draw
 import skimage.morphology
+import tqdm.auto as tqdm
+
+from unsupervised_behaviors import utils
 
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
 import bb_tracking
 import bb_tracking.types
-import pipeline
-
-from unsupervised_behaviors import utils
 
 
 def get_saliency_pipeline() -> Tuple[pipeline.Pipeline, Iterable[str]]:

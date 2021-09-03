@@ -2,21 +2,23 @@ import datetime
 import decimal
 import pathlib
 import sys
-from typing import Set, Tuple, Iterable
+from typing import Iterable, Set, Tuple
 
-import joblib
 import h5py
+import joblib
 import numpy as np
+import pandas as pd
 import scipy
 import scipy.ndimage
 import skimage
 import skimage.draw
 import skimage.exposure
-import skimage.transform
 import skimage.io
+import skimage.transform
 import skvideo
 import skvideo.io
-import pandas as pd
+
+import unsupervised_behaviors.constants
 
 import bb_behavior
 import bb_behavior.db
@@ -25,9 +27,6 @@ import bb_behavior.utils
 import bb_behavior.utils.images
 import bb_tracking
 import bb_tracking.types
-
-import unsupervised_behaviors.constants
-
 
 APPLICATION_NAME = "unsupervised_behaviors"
 
@@ -552,7 +551,7 @@ def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: i
         f.create_dataset("images", shape, chunks=chunks, dtype="u8", compression="lzf")
         f.create_dataset("tag_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
         f.create_dataset("loss_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
-        f.create_dataset("labels", (num_videos,), dtype=bool)
+        f.create_dataset("labels", (num_videos,), dtype=int)
 
 
 def get_track_detections_from_frame_container(fc_id: decimal.Decimal, num_frames: int):
