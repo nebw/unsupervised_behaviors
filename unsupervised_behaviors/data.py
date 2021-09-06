@@ -736,7 +736,9 @@ def load_and_store_videos(
                 sys.stdout.write(f"\rLoaded {idx}/{to_idx} videos.")
 
 
-def extract_video(h5_path: pathlib.Path, video_idx: int, output_path: pathlib.Path):
+def extract_video(
+    h5_path: pathlib.Path, video_idx: int, output_path: pathlib.Path, with_mask: bool = False
+):
     """Extract a single video from the h5 file and store it in a compressed video.
 
     Parameters
@@ -751,9 +753,10 @@ def extract_video(h5_path: pathlib.Path, video_idx: int, output_path: pathlib.Pa
     with h5py.File(h5_path, "r") as f:
 
         video = f["images"][video_idx]
-        mask = f["tag_masks"][video_idx] * f["loss_masks"][video_idx]
 
-        video *= mask
+        if with_mask:
+            mask = f["tag_masks"][video_idx] * f["loss_masks"][video_idx]
+            video *= mask
 
         outputdict = {"-c:v": "libx264", "-crf": "0", "-preset": "veryslow", "-filter:v": "fps=6"}
 
