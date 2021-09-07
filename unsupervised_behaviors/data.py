@@ -18,6 +18,7 @@ import skimage.io
 import skimage.transform
 import skvideo
 import skvideo.io
+import torch
 
 import unsupervised_behaviors.constants
 
@@ -763,3 +764,59 @@ def extract_video(
         with skvideo.io.FFmpegWriter(output_path, outputdict=outputdict) as writer:
             for frame in video:
                 writer.writeFrame(frame[:, :, None].repeat(3, axis=-1))
+
+
+class MaskedFrameDataset(torch.utils.data.Dataset):
+    def __init__(
+        self, path, transform=None, target_transform=None, masked=True, horizontal_crop=None
+    ):
+        self.file = h5py.File(path, "r")
+
+        self.images = self.file["images"]
+        self.tag_masks = self.file["tag_masks"]
+        self.loss_masks = self.file["loss_masks"]
+        self.labels = self.file["labels"]
+        self.masked = masked
+        self.horizontal_crop = horizontal_crop
+
+        self.transform = transform
+        self.target_transform = target_transform
+
+        self.is_video_dataset = self.images.ndim == 4
+
+    def __len__(self):
+        if self.is_video_dataset:
+            return self.images.shape[0] * self.images.shape[1]
+        else:
+            return len(self.images)
+
+    def __getitem__(self, idx):
+        if self.is_video_dataset:
+            idx, frame_idx = divmod(idx, self.images.shape[1])
+            # frame_idx = self.images.shape[1] // 2
+            # frame_idx = np.random.randint(0, self.images.shape[1])
+            image = self.images[idx, frame_idx]
+        else:
+            image = self.images[idx]
+
+        label = self.labels[idx]
+
+        if self.masked:
+            if self.is_video_dataset:
+                mask = self.tag_masks[idx, frame_idx] * self.loss_masks[idx, frame_idx]
+            else:
+                mask = self.tag_masks[idx] * self.loss_masks[idx]
+
+            image *= mask
+
+        if self.horizontal_crop is not None:
+            image = image[:, self.horizontal_crop : -self.horizontal_crop]
+
+        image = np.expand_dims(image, -1).astype(np.float32)
+
+        if self.transform:
+            image = self.transform(image)
+        if self.target_transform:
+            label = self.target_transform(label)
+
+        return image, label

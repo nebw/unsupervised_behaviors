@@ -1,11 +1,13 @@
+import typing
+
 import numpy as np
 import torch
 import torchtyping
 from torchtyping import TensorType  # type: ignore
 
-from unsupervised_behaviors.cpc.layers import Contexter, Embedder
+from unsupervised_behaviors.cpc.layers import Contexter, Embedder, ImageResidualBlock
 from unsupervised_behaviors.cpc.loss import nt_xent_loss
-from unsupervised_behaviors.types import batch, channels, time
+from unsupervised_behaviors.types import batch, channels, horizontal, time, vertical
 
 torchtyping.patch_typeguard()
 
@@ -190,3 +192,50 @@ class ConvCPC(torch.nn.Module):
         X_ctx = self.contexter(X_emb_padded)
 
         return X_emb, X_ctx
+
+
+class ImageConvCPC(ConvCPC):
+    def __init__(
+        self,
+        num_image_channels: int,
+        num_features: int,
+        num_image_residual_blocks: int,
+        tile_size: int,
+        frn_norm: bool = True,
+        aggfunc: typing.Callable[[TensorType], TensorType] = lambda x: x.mean(dim=(2, 3)),
+        **kwargs,
+    ):
+        super().__init__(num_features=num_features, **kwargs)
+
+        self.tile_size = tile_size
+        self.aggfunc = aggfunc
+        self.convolutions = torch.nn.Sequential(
+            torch.nn.Conv2d(num_image_channels, num_features, padding=0, kernel_size=3),
+            *(
+                ImageResidualBlock(num_features, padding=0, kernel_size=3, frn_norm=frn_norm)
+                for _ in range(num_image_residual_blocks)
+            ),
+        )
+
+        for m in self.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight, mode="fan_out")
+                torch.nn.init.zeros_(m.bias)
+
+    def forward(
+        self,
+        X: TensorType["batch", "channels", "vertical", "horizontal", float],
+    ):
+        X_tiles = torch.nn.functional.unfold(
+            X, (self.tile_size, self.tile_size), stride=self.tile_size // 2
+        )
+
+        X_tiles_conv = X_tiles.transpose(2, 1)
+        X_tiles_conv = X_tiles_conv.reshape(
+            X_tiles_conv.shape[0] * X_tiles_conv.shape[1], self.tile_size, self.tile_size
+        )[:, None, :, :]
+        X_tiles_conv = self.convolutions(X_tiles_conv).mean(dim=(2, 3))
+        X_tiles = X_tiles_conv.reshape(X_tiles.shape[0], X_tiles.shape[-1], -1)
+        X_tiles = X_tiles.transpose(2, 1)
+
+        return super().forward(X_tiles)

@@ -4,3 +4,5 @@
 batch = None
 channels = None
 time = None
+horizontal = None
+vertical = None
