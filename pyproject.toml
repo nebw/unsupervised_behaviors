@@ -1,6 +1,7 @@
 [tool.black]
 line-length = 100
 target-version = ['py36', 'py37', 'py38']
+experimental_string_processing = true
 include = '\.pyi?$'
 exclude = '''
 /(
