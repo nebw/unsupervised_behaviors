@@ -3,7 +3,7 @@ import decimal
 import logging
 import pathlib
 import sys
-from typing import Iterable, Set, Tuple
+from typing import Iterable, List, Set, Tuple
 
 import h5py
 import joblib
@@ -228,6 +228,7 @@ def get_image_and_mask_for_detections(
     body_center_offset_px: int = 20,
     body_mask_length_px: int = 100,
     body_mask_width_px: int = 60,
+    egocentric: bool = True,
     n_jobs: int = -1,
 ) -> Tuple[np.array, np.array, np.array]:
     """Fetch image regions from raw BeesBook videos centered on detections of
@@ -260,6 +261,8 @@ def get_image_and_mask_for_detections(
         Length of body mask ellipsoid. Defaults to 100.
     body_mask_width_px : int, optional
         Width of body mask ellipsoid. Defaults to 60.
+    egocentric : bool, optional
+        Rotate frame using bee orientation such that it is egocentric.
     n_jobs : int, optional
         Number of parallel jobs for processing.
 
@@ -299,7 +302,11 @@ def get_image_and_mask_for_detections(
             center_y = row.y_pos - np.sin(row.orientation) * body_center_offset_px
             center_x = row.x_pos - np.cos(row.orientation) * body_center_offset_px
             center = np.array((center_x, center_y))
-            rotation_deg = (1 / (2 * np.pi)) * 360 * (row.orientation - np.pi / 2 + np.pi)
+
+            if egocentric:
+                rotation_deg = (1 / (2 * np.pi)) * 360 * (row.orientation - np.pi / 2 + np.pi)
+            else:
+                rotation_deg = 0
 
             image = bb_behavior.utils.images.get_crop_from_image(
                 center, frame, width=image_size_px, clahe=False
@@ -481,7 +488,8 @@ def get_event_detection_trajectory_generator(
     Returns
     -------
     Iterable[pd.DataFrame]
-        Generator of DataFrames with positions, orientations, frame and track IDs.
+        Generator of DataFrames with positions, orientations, frame and track IDs, and detection
+        indices.
     """
     with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
         for cam_id, timestamp in timestamps:
@@ -556,6 +564,9 @@ def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: i
         f.create_dataset("images", shape, chunks=chunks, dtype="u8", compression="lzf")
         f.create_dataset("tag_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
         f.create_dataset("loss_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
+        f.create_dataset("frame_ids", (num_videos, num_frames_around * 2 + 1), dtype=np.uint)
+        f.create_dataset("x_pos", (num_videos, num_frames_around * 2 + 1), dtype=np.float32)
+        f.create_dataset("y_pos", (num_videos, num_frames_around * 2 + 1), dtype=np.float32)
         f.create_dataset("labels", (num_videos,), dtype=int)
 
 
@@ -661,15 +672,16 @@ def get_random_detection_trajectory_generator(
 def load_and_store_videos(
     h5_path: pathlib.Path,
     trajectory_generator: Iterable[pd.DataFrame],
-    label: unsupervised_behaviors.constants.DanceLabels,
+    label: unsupervised_behaviors.constants.Behaviors,
     from_idx: int,
     to_idx: int,
     video_manager: bb_behavior.io.videos.BeesbookVideoManager,
     use_clahe: bool = True,
     clear_video_cache: bool = True,
+    egocentric: bool = True,
     verbose: bool = True,
     n_jobs: int = -1,
-) -> None:
+) -> List[pd.DataFrame]:
     """For each trajectory, load images and masks and store them in the given h5 file.
 
     Parameters
@@ -678,7 +690,7 @@ def load_and_store_videos(
         Output file path.
     trajectory_generator: Iterable[pd.DataFrame]
         Trajectory generator as returned by `get_*_detection_trajectory_generator`.
-    label: unsupervised_behaviors.constants.DanceLabels
+    label: unsupervised_behaviors.constants.Behaviors
         Label of events returned by `trajectory_generator`.
     from_idx: int
         Store videos in h5 file starting at index `from_idx`.
@@ -689,6 +701,8 @@ def load_and_store_videos(
         Video cache.
     use_clahe: bool, optional
         Process entire frame using CLAHE. Defaults to True.
+    egocentric: bool, optional
+        Rotate each frame such that it is egocentric.
     clear_video_cache: bool, optional
         Clear video cache at end of processing.
     verbose: bool, optional
@@ -701,6 +715,9 @@ def load_and_store_videos(
         tag_masks_dset = f["tag_masks"]
         loss_masks_dset = f["loss_masks"]
         labels_dset = f["labels"]
+        frame_ids_dset = f["frame_ids"]
+        x_pos_dset = f["x_pos"]
+        y_pos_dset = f["y_pos"]
 
         idx = from_idx
         for detection_df in trajectory_generator:
@@ -708,7 +725,11 @@ def load_and_store_videos(
             video_manager.cache_frames(all_frame_ids)
 
             (images, masks, loss_masks, detection_df,) = get_image_and_mask_for_detections(
-                detection_df, video_manager, use_clahe=use_clahe, n_jobs=n_jobs
+                detection_df,
+                video_manager,
+                use_clahe=use_clahe,
+                n_jobs=n_jobs,
+                egocentric=egocentric,
             )
 
             # if generator is event generator: video_idx, if random generator: track_id
@@ -721,6 +742,9 @@ def load_and_store_videos(
                 tag_masks_dset[idx, :] = masks[idxs]
                 loss_masks_dset[idx, :] = loss_masks[idxs]
                 labels_dset[idx] = label
+                frame_ids_dset[idx, :] = group.frame_id[:]
+                x_pos_dset[idx, :] = group.x_pos[:]
+                y_pos_dset[idx, :] = group.y_pos[:]
 
                 idx += 1
 
@@ -750,6 +774,8 @@ def extract_video(
         Sequential index of video to extract.
     output_path: pathlib.Path
         Output video path.
+    with_mask: bool
+        Mask out tags and background.
     """
     with h5py.File(h5_path, "r") as f:
 
