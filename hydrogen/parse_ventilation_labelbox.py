@@ -1,24 +1,25 @@
 # %%
-import h5py
 import datetime
 import json
+import pathlib
+
+import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pathlib
-from fastprogress.fastprogress import force_console_behavior
-import matplotlib.pyplot as plt
 import seaborn as sns
 import skimage.draw
-
+from fastprogress.fastprogress import force_console_behavior
 from shared.plotting import setup_matplotlib
-import bb_behavior
-import bb_behavior.db
-import bb_behavior.io
-import bb_tracking.types
+
 import unsupervised_behaviors
 import unsupervised_behaviors.data
 from unsupervised_behaviors.constants import Behaviors
 
+import bb_behavior
+import bb_behavior.db
+import bb_behavior.io
+import bb_tracking.types
 
 APPLICATION_NAME = "unsupervised_behaviors"
 
@@ -29,7 +30,7 @@ setup_matplotlib()
 
 # %%
 path = "/home/ben/Downloads/label.json"
-data = json.load(open(path, "r"))
+data = json.load(open(path))
 
 # %%
 rows = []
@@ -120,6 +121,7 @@ with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) a
 
 # %%
 
+
 def line_distance(line_points, point):
     p1, p2 = line_points
     dp = p2 - p1
@@ -195,8 +197,10 @@ np.sum(np.array(distances) < 35)
 
 # %%
 threshold = 35
-ventilation_df = pd.concat([pd.concat((e[0], e[1])) for d, e in zip(
-    distances, closest_detections) if d < threshold], axis=1).T
+ventilation_df = pd.concat(
+    [pd.concat((e[0], e[1])) for d, e in zip(distances, closest_detections) if d < threshold],
+    axis=1,
+).T
 # TODO: random duration
 ventilation_df["from"] = ventilation_df["timestamp"]
 ventilation_df["to"] = ventilation_df["timestamp"] + datetime.timedelta(seconds=2)
@@ -233,11 +237,11 @@ groups = unsupervised_behaviors.data.load_and_store_videos(
 )
 
 # %%
-with h5py.File(output_path, 'r') as f:
-    for video_idx in range(len(f['images'])):
-        frames = f['images'][video_idx]
+with h5py.File(output_path, "r") as f:
+    for video_idx in range(len(f["images"])):
+        frames = f["images"][video_idx]
         plt.imshow(frames[0], cmap=plt.cm.gray)
         plt.show()
 
 # %%
-unsupervised_behaviors.data.extract_video(output_path, -30, '/home/ben/test.mp4', with_mask=True)
+unsupervised_behaviors.data.extract_video(output_path, -30, "/home/ben/test.mp4", with_mask=True)
