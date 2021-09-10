@@ -39,7 +39,7 @@ trajectory_generator = data.get_random_detection_trajectory_generator(num_frames
 data.load_and_store_videos(
     output_path,
     trajectory_generator,
-    constants.DanceLabels.UNKNOWN,
+    constants.Behaviors.UNKNOWN.value,
     num_videos_per_behavior * 2,
     num_videos_total,
     video_manager,
@@ -56,14 +56,11 @@ trajectory_generator = data.get_event_detection_trajectory_generator(
     dances_df, frequent_dance_intervals.index, num_frames_around, min_proportion_detected
 )
 
-trajs = list(trajectory_generator)
-len(trajs)
-
 # %%
 data.load_and_store_videos(
     output_path,
     trajectory_generator,
-    constants.DanceLabels.DANCE,
+    constants.Behaviors.DANCE.value,
     0,
     num_videos_per_behavior,
     video_manager,
@@ -87,7 +84,7 @@ trajectory_generator = data.get_event_detection_trajectory_generator(
 data.load_and_store_videos(
     output_path,
     trajectory_generator,
-    constants.DanceLabels.FOLLOWING,
+    constants.Behaviors.FOLLOWING.value,
     num_videos_per_behavior,
     num_videos_per_behavior * 2,
     video_manager,

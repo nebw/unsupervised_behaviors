@@ -15,7 +15,7 @@ import torchvision
 import umap
 from shared.plotting import setup_matplotlib
 
-from unsupervised_behaviors.constants import DanceLabels
+from unsupervised_behaviors.constants import Behaviors
 from unsupervised_behaviors.cpc.model import ImageConvCPC
 from unsupervised_behaviors.data import MaskedFrameDataset
 
@@ -157,9 +157,9 @@ embedding = umap.UMAP(
 # %%
 plt.figure(figsize=(12, 6))
 
-colors = sns.color_palette(n_colors=len(DanceLabels))
+colors = sns.color_palette(n_colors=len(Behaviors))
 
-for label in DanceLabels:
+for label in Behaviors:
     elems = embedding[labels == label.value]
     scatter = plt.scatter(elems[:, 0], elems[:, 1], s=3, c=[colors[label.value]], label=label.name)
 
