@@ -1,7 +1,6 @@
 # %%
 import sys
 
-import h5py
 import madgrad
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +13,6 @@ import sklearn.model_selection
 import torch
 import torchvision
 import umap
-from openTSNE import TSNE
 from shared.plotting import setup_matplotlib
 
 from unsupervised_behaviors.constants import DanceLabels
@@ -113,18 +111,8 @@ for _ in range(num_batches - len(losses)):
         X, target = next(dataloader_iterator)
 
     X = X.to(device, non_blocking=True)
-    break
-    X_tiles = torch.nn.functional.unfold(X, (tile_size, tile_size), stride=tile_size // 2)
 
-    X_tiles_conv = X_tiles.transpose(2, 1)
-    X_tiles_conv = X_tiles_conv.reshape(
-        X_tiles_conv.shape[0] * X_tiles_conv.shape[1], tile_size, tile_size
-    )[:, None, :, :]
-    X_tiles_conv = conv(X_tiles_conv).mean(dim=(2, 3))
-    X_tiles = X_tiles_conv.reshape(X_tiles.shape[0], X_tiles.shape[-1], -1)
-    X_tiles = X_tiles.transpose(2, 1)
-
-    X_emb, X_ctx = model(X_tiles)
+    X_emb, X_ctx = model(X)
 
     batch_loss = model.cpc_loss(X_emb, X_ctx)
 
@@ -149,17 +137,7 @@ data_loader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=F
 with torch.no_grad():
     for x, y in data_loader:
         X = x.to(device, non_blocking=True)
-        X_tiles = torch.nn.functional.unfold(X, (tile_size, tile_size), stride=tile_size // 2)
-
-        X_tiles_conv = X_tiles.transpose(2, 1)
-        X_tiles_conv = X_tiles_conv.reshape(
-            X_tiles_conv.shape[0] * X_tiles_conv.shape[1], tile_size, tile_size
-        )[:, None, :, :]
-        X_tiles_conv = conv(X_tiles_conv).mean(dim=(2, 3))
-        X_tiles = X_tiles_conv.reshape(X_tiles.shape[0], X_tiles.shape[-1], -1)
-        X_tiles = X_tiles.transpose(2, 1)
-
-        X_emb, X_ctx = model(X_tiles)
+        X_emb, X_ctx = model(X)
 
         cpc_reps.append(X_ctx.mean(dim=-1).cpu().numpy())
         labels.append(y.cpu().numpy())
@@ -172,14 +150,9 @@ cpc_reps.shape
 
 # %%
 embedding = umap.UMAP(
-    # n_neighbors=30, min_dist=0.0,
     n_components=2,
     n_jobs=-1,
 ).fit_transform(cpc_reps)
-
-"""
-embedding = TSNE(n_jobs=-1).fit(cpc_reps)
-"""
 
 # %%
 plt.figure(figsize=(12, 6))
@@ -208,4 +181,4 @@ sklearn.model_selection.cross_val_score(
 ).mean()
 
 # %%
-torch.save((model, conv, optimizer, losses), model_path)
+torch.save((model, optimizer, losses), model_path)
