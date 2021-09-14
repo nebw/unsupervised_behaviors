@@ -94,7 +94,7 @@ class ConvCPC(torch.nn.Module):
 
         from_timesteps = np.random.randint(
             low=min_from_timesteps,
-            high=num_timesteps,
+            high=num_timesteps - self.num_ahead_subsampling,
             size=batch_size,
         )
 
