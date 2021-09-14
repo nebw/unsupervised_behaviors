@@ -209,6 +209,7 @@ class ImageConvCPC(ConvCPC):
 
         self.tile_size = tile_size
         self.aggfunc = aggfunc
+        self.num_image_channels = num_image_channels
         self.convolutions = torch.nn.Sequential(
             torch.nn.Conv2d(num_image_channels, num_features, padding=0, kernel_size=3),
             *(
@@ -232,10 +233,46 @@ class ImageConvCPC(ConvCPC):
 
         X_tiles_conv = X_tiles.transpose(2, 1)
         X_tiles_conv = X_tiles_conv.reshape(
-            X_tiles_conv.shape[0] * X_tiles_conv.shape[1], self.tile_size, self.tile_size
-        )[:, None, :, :]
-        X_tiles_conv = self.convolutions(X_tiles_conv).mean(dim=(2, 3))
+            X_tiles_conv.shape[0] * X_tiles_conv.shape[1],
+            self.num_image_channels,
+            self.tile_size,
+            self.tile_size,
+        )
+        X_tiles_conv = self.aggfunc(self.convolutions(X_tiles_conv))
         X_tiles = X_tiles_conv.reshape(X_tiles.shape[0], X_tiles.shape[-1], -1)
         X_tiles = X_tiles.transpose(2, 1)
 
         return super().forward(X_tiles)
+
+
+class ColumnImageConvCPC(ImageConvCPC):
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+    def forward(
+        self,
+        X: TensorType["batch", "channels", "vertical", "horizontal", float],
+    ):
+        X_tiles = torch.nn.functional.unfold(
+            X, (self.tile_size, self.tile_size), stride=self.tile_size // 2
+        )
+
+        X_tiles_conv = X_tiles.transpose(2, 1)
+        X_tiles_conv = X_tiles_conv.reshape(
+            X_tiles_conv.shape[0] * X_tiles_conv.shape[1],
+            self.num_image_channels,
+            self.tile_size,
+            self.tile_size,
+        )
+        X_tiles_conv = self.aggfunc(self.convolutions(X_tiles_conv))
+        X_tiles = X_tiles_conv.reshape(X_tiles.shape[0], X_tiles.shape[-1], -1)
+
+        X_tiles = X_tiles.reshape(
+            len(X_tiles) * self.subsample_length, self.subsample_length, X_tiles.shape[-1]
+        )
+        X_tiles = X_tiles.transpose(2, 1)
+
+        return ConvCPC.forward(self, X_tiles)
