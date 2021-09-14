@@ -20,8 +20,6 @@ import skvideo
 import skvideo.io
 import torch
 
-import unsupervised_behaviors.constants
-
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
@@ -29,6 +27,8 @@ import bb_behavior.utils
 import bb_behavior.utils.images
 import bb_tracking
 import bb_tracking.types
+
+import unsupervised_behaviors.constants
 
 APPLICATION_NAME = "unsupervised_behaviors"
 
@@ -794,7 +794,13 @@ def extract_video(
 
 class MaskedFrameDataset(torch.utils.data.Dataset):
     def __init__(
-        self, path, transform=None, target_transform=None, masked=True, horizontal_crop=None
+        self,
+        path,
+        transform=None,
+        target_transform=None,
+        ellipse_masked=True,
+        tag_masked=True,
+        horizontal_crop=None,
     ):
         self.file = h5py.File(path, "r")
 
@@ -802,7 +808,8 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
         self.tag_masks = self.file["tag_masks"]
         self.loss_masks = self.file["loss_masks"]
         self.labels = self.file["labels"]
-        self.masked = masked
+        self.ellipse_masked = ellipse_masked
+        self.tag_masked = tag_masked
         self.horizontal_crop = horizontal_crop
 
         self.transform = transform
@@ -816,6 +823,22 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
         else:
             return len(self.images)
 
+    def apply_masks(self, image, idx, frame_idx=None):
+        def _apply_mask(image, mask_dset):
+            if self.is_video_dataset:
+                mask = mask_dset[idx, frame_idx]
+            else:
+                mask = mask_dset[idx]
+            return image * mask
+
+        if self.tag_masked:
+            image = _apply_mask(image, self.tag_masks)
+
+        if self.ellipse_masked:
+            image = _apply_mask(image, self.loss_masks)
+
+        return image
+
     def __getitem__(self, idx):
         if self.is_video_dataset:
             idx, frame_idx = divmod(idx, self.images.shape[1])
@@ -824,16 +847,10 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
             image = self.images[idx, frame_idx]
         else:
             image = self.images[idx]
+            frame_idx = None
 
+        image = self.apply_masks(image, idx, frame_idx)
         label = self.labels[idx]
-
-        if self.masked:
-            if self.is_video_dataset:
-                mask = self.tag_masks[idx, frame_idx] * self.loss_masks[idx, frame_idx]
-            else:
-                mask = self.tag_masks[idx] * self.loss_masks[idx]
-
-            image *= mask
 
         if self.horizontal_crop is not None:
             image = image[:, self.horizontal_crop : -self.horizontal_crop]
