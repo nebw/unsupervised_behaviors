@@ -10,16 +10,17 @@ import pandas as pd
 import seaborn as sns
 import skimage.draw
 from fastprogress.fastprogress import force_console_behavior
-from shared.plotting import setup_matplotlib
-
-import unsupervised_behaviors
-import unsupervised_behaviors.data
-from unsupervised_behaviors.constants import Behaviors
 
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
 import bb_tracking.types
+
+import unsupervised_behaviors
+import unsupervised_behaviors.data
+from unsupervised_behaviors.constants import Behaviors
+
+from shared.plotting import setup_matplotlib
 
 APPLICATION_NAME = "unsupervised_behaviors"
 

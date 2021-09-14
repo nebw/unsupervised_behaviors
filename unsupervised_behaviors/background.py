@@ -10,13 +10,13 @@ import skimage.draw
 import skimage.morphology
 import tqdm.auto as tqdm
 
-from unsupervised_behaviors import utils
-
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
 import bb_tracking
 import bb_tracking.types
+
+from unsupervised_behaviors import utils
 
 
 def get_saliency_pipeline() -> Tuple[pipeline.Pipeline, Iterable[str]]:
