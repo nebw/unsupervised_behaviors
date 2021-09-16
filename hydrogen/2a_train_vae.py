@@ -1,15 +1,8 @@
 # %% codecell
+import io
 import os
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-
-import datetime
-import io
-
 # %% codecell
-import pathlib
-import sys
 import time
 
 import h5py
@@ -24,6 +17,10 @@ import tqdm
 import hierarchical_vae.hps as hps
 from hierarchical_vae.train_helpers import load_opt, set_up_hyperparams
 from hierarchical_vae.vae import VAE
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 
 # %% codecell
 device = "cuda:0"
@@ -104,7 +101,6 @@ optimizer.load_state_dict(state['optimizer_state_dict'])
 """
 
 # %% codecell
-############# train ###############
 start = time.time()
 base = "vae_"
 

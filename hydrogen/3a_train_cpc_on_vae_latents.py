@@ -26,7 +26,7 @@ num_ahead_subsampling = 1
 learning_rate = 0.001
 weight_decay = 1e-5
 
-num_batches = 10000
+num_batches = 100000
 batch_size = 128
 
 # %%
@@ -64,7 +64,7 @@ for _ in range(num_batches - len(losses)):
     sys.stdout.write(f"\r{len(losses) / num_batches} - {np.mean(losses[-100:]):.3f}")
 
 # %%
-plt.plot(pd.Series(losses).rolling(128).mean())
+plt.plot(pd.Series(losses).rolling(1024).mean())
 
 # %%
 torch.save((model, optimizer, losses), model_path)

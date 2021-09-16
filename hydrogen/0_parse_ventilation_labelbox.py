@@ -208,41 +208,5 @@ ventilation_df["to"] = ventilation_df["timestamp"] + datetime.timedelta(seconds=
 ventilation_df.head()
 
 # %%
-frequent_ventilation_intervals = unsupervised_behaviors.data.get_frequent_intervals(ventilation_df)
-
-num_frames_around = 16
-min_proportion_detected = 0.75
-
-trajectory_generator = unsupervised_behaviors.data.get_event_detection_trajectory_generator(
-    ventilation_df, frequent_ventilation_intervals.index, num_frames_around, min_proportion_detected
-)
-
-# %%
-num_videos_total = 200
-num_videos_per_behavior = 200
-
-output_path = f"/home/ben/ssh/snuffles-data/public/benwild/predictive/videos_2019_{num_videos_total}videos_{num_frames_around}frames_ventilation.h5"
-unsupervised_behaviors.data.create_video_h5(output_path, num_videos_total, num_frames_around)
-
-# %%
-groups = unsupervised_behaviors.data.load_and_store_videos(
-    output_path,
-    trajectory_generator,
-    Behaviors.VENTILATING.value,
-    0,
-    num_videos_per_behavior,
-    video_manager,
-    use_clahe=True,
-    egocentric=True,
-    n_jobs=8,
-)
-
-# %%
-with h5py.File(output_path, "r") as f:
-    for video_idx in range(len(f["images"])):
-        frames = f["images"][video_idx]
-        plt.imshow(frames[0], cmap=plt.cm.gray)
-        plt.show()
-
-# %%
-unsupervised_behaviors.data.extract_video(output_path, -30, "/home/ben/test.mp4", with_mask=True)
+ventilation_df.to_pickle("/home/ben/ssh/snuffles-data/public/benwild/ventilation.pickle")
+ventilation_df.to_csv("/home/ben/ssh/snuffles-data/public/benwild/ventilation.csv")
