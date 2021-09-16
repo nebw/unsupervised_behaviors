@@ -301,6 +301,13 @@ def get_image_and_mask_for_detections(
         for _, row in frame_detections.iterrows():
             center_y = row.y_pos - np.sin(row.orientation) * body_center_offset_px
             center_x = row.x_pos - np.cos(row.orientation) * body_center_offset_px
+
+            # assert center point always within frame (even after trajectory extrapolation)
+            center_x = max(0, center_x)
+            center_x = min(frame.shape[1] - 1, center_x)
+            center_y = max(0, center_y)
+            center_y = min(frame.shape[0] - 1, center_y)
+
             center = np.array((center_x, center_y))
 
             if egocentric:
@@ -311,6 +318,7 @@ def get_image_and_mask_for_detections(
             image = bb_behavior.utils.images.get_crop_from_image(
                 center, frame, width=image_size_px, clahe=False
             )
+
             image = (rotate_crop_zoom(image, rotation_deg) * 255).astype(np.uint8)
             images.append(image)
 
