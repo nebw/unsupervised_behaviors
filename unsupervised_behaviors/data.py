@@ -565,7 +565,7 @@ def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: i
     num_frames_around:
         Number of frames around each frame, used to determine number of frames per video.
     """
-    with h5py.File(h5_path, "w") as f:
+    with h5py.File(h5_path, "w", libver="latest") as f:
         shape = (num_videos, num_frames_around * 2 + 1, 128, 128)
         chunks = (1, num_frames_around * 2 + 1, 128, 128)
 
