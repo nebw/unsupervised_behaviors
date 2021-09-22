@@ -833,6 +833,8 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
     ):
         self.file = h5py.File(path, "r")
 
+        self.mean = self.file["mean"][()]
+
         self.images = self.file["images"]
         self.tag_masks = self.file["tag_masks"]
         self.loss_masks = self.file["loss_masks"]
@@ -858,7 +860,7 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
                 mask = mask_dset[idx, frame_idx]
             else:
                 mask = mask_dset[idx]
-            return image * mask
+            return image * mask + (1 - mask) * self.mean
 
         if self.tag_masked:
             image = _apply_mask(image, self.tag_masks)
