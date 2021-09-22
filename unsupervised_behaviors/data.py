@@ -280,8 +280,16 @@ def get_image_and_mask_for_detections(
         image = scipy.ndimage.zoom(image[crop:-crop, crop:-crop], image_zoom_factor, order=1)
         return image
 
+    def get_tag_mask(frame, all_detections_df):
+        tag_mask = np.ones_like(frame)
+        for _, row in all_detections_df.iterrows():
+            tag_mask[
+                skimage.draw.disk((row.y_pos, row.x_pos), tag_mask_size_px, shape=frame.shape)
+            ] = 0
+        return tag_mask
+
     def extract_images(
-        frame_detections: pd.DataFrame, frame_path: str
+        frame_detections: pd.DataFrame, all_detections_df: pd.DataFrame, frame_path: str
     ) -> Tuple[np.array, np.array, np.array, np.array]:
         images = []
         tag_masks = []
@@ -293,11 +301,9 @@ def get_image_and_mask_for_detections(
         if use_clahe:
             frame = skimage.exposure.equalize_adapthist(frame, clahe_kernel_size_px)
 
-        tag_mask = np.ones_like(frame)
-        for _, row in frame_detections.iterrows():
-            tag_mask[
-                skimage.draw.disk((row.y_pos, row.x_pos), tag_mask_size_px, shape=frame.shape)
-            ] = 0
+        assert frame_detections.frame_id.nunique() == 1
+        frame_id = frame_detections.frame_id.unique()[0]
+        tag_mask = get_tag_mask(frame, all_detections_df[all_detections_df.frame_id == frame_id])
 
         for _, row in frame_detections.iterrows():
             center_y = row.y_pos - np.sin(row.orientation) * body_center_offset_px
@@ -366,6 +372,20 @@ def get_image_and_mask_for_detections(
     body_masks = []
     rows = []
 
+    # detections may not contain all detections in each frame, so fetch them from the DB to
+    # make sure that all tags are masked out
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        all_detections_df = pd.read_sql(
+            f"""
+            SELECT frame_id, x_pos, y_pos
+            FROM {bb_behavior.db.get_detections_tablename()}
+            WHERE
+                frame_id IN {tuple(map(int, detections.frame_id.unique()))}
+            """,
+            con=con,
+            coerce_float=False,
+        )
+
     detections_by_frame = detections.groupby("timestamp")
 
     # preload file paths because video_manager can't be used in parallel.
@@ -375,7 +395,7 @@ def get_image_and_mask_for_detections(
         frame_paths.append(video_manager.get_frame_id_path(frame_detections.frame_id.iloc[0]))
 
     parallel = joblib.Parallel(prefer="processes", n_jobs=n_jobs)(
-        joblib.delayed(extract_images)(frame_detections, frame_path)
+        joblib.delayed(extract_images)(frame_detections, all_detections_df, frame_path)
         for (_, frame_detections), frame_path in zip(detections_by_frame, frame_paths)
     )
 
