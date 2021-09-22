@@ -1,5 +1,6 @@
 # %%
 import itertools
+import os
 import subprocess
 
 import h5py
@@ -15,30 +16,105 @@ import sklearn.metrics
 import sklearn.mixture
 import sklearn.model_selection
 import torch
+import umap
+from fastprogress.fastprogress import force_console_behavior
 from openTSNE import TSNE
 
+import bb_behavior
+import bb_behavior.db
+from bb_behavior.trajectory.features import FeatureTransform
+
 import unsupervised_behaviors.data
+from unsupervised_behaviors.baselines import FrameCNNBaseline
 from unsupervised_behaviors.constants import Behaviors
 
 from shared.plotting import setup_matplotlib
 
+master_bar, progress_bar = force_console_behavior()
 setup_matplotlib()
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+APPLICATION_NAME = "unsupervised_behaviors"
+
+bb_behavior.db.set_season_berlin_2019()
 
 # %%
 batch_size = 128
-device = "cuda:2"
+device = "cuda:0"
 
-latents_path = "/srv/data/benwild/data/unsupervised_behaviors/latents--videos_2019_10000--image_cpc_20210914.pt"
-model_path = "/srv/data/benwild/data/unsupervised_behaviors/cpc_on_cpc_reps_20210915.pt"
-videos_path = "/storage/mi/jennyonline/data/videos_2019_10000.h5"
+latents_path = "/srv/data/benwild/data/unsupervised_behaviors/latents--videos_2019_20000videos_32frames_allbehaviors--image_cpc_20210917.pt"
+model_path = "/srv/data/benwild/data/unsupervised_behaviors/cpc_on_cpc_reps_20210921.pt"
+videos_path = "/srv/public/benwild/predictive/videos_2019_20000videos_32frames_allbehaviors.h5"
 
 # %%
-frame_idx = 16
+with h5py.File(videos_path, "r") as f:
+    labels = f["labels"][:]
+
+# %%
+with h5py.File(videos_path, "r") as f:
+    frame_ids = f["frame_ids"][:]
+    center_idx = frame_ids.shape[1] // 2
+    frame_ids = frame_ids[:, center_idx]
+    x_pos = f["x_pos"][:, center_idx].astype(np.uint64)
+    y_pos = f["y_pos"][:, center_idx].astype(np.uint64)
+
+truth_df = pd.DataFrame(
+    np.stack((frame_ids, x_pos, y_pos)).T, columns=["frame_id", "x_pos", "y_pos"]
+)
+
+# %%
+detections = bb_behavior.db.sampling.get_detections_dataframe_for_frames(
+    truth_df.frame_id, use_hive_coordinates=False
+)
+detections.frame_id = detections.frame_id.astype(np.uint64)
+dets_by_frame_id = dict(list(detections.groupby("frame_id")))
+
+# %%
+
+
+def get_matching_bee_id(row):
+    df = dets_by_frame_id[row.frame_id]
+    p0 = np.array((row.x_pos, row.y_pos))[None, :]
+    p1 = np.stack((df.x_pos, df.y_pos)).T
+    distances = np.linalg.norm(p0 - p1, ord=2, axis=1)
+    return df.iloc[np.argmin(distances)].bee_id
+
+
+bee_ids = truth_df.apply(get_matching_bee_id, axis=1)
+truth_df["bee_id"] = bee_ids
+truth_df["label"] = labels
+
+# %%
+features = [FeatureTransform.Angle2Geometric(), FeatureTransform.Egomotion()]
+
+data_reader = bb_behavior.trajectory.features.DataReader(
+    dataframe=truth_df,
+    use_hive_coords=True,
+    frame_margin=8,
+    target_column="label",
+    feature_procs=features,
+    sample_count=None,
+    chunk_frame_id_queries=True,
+    n_threads=4,
+)
+
+data_reader.create_features()
+
+traj_X = sklearn.decomposition.PCA(n_components=0.99).fit_transform(
+    data_reader.X.reshape(len(data_reader.X), -1)
+)
+traj_Y = data_reader.Y.astype(int)[:, 0]
+
+# %%
+frame_idx = 32
 with h5py.File(videos_path, "r") as f:
     video_idx = sorted(np.random.choice(np.arange(len(f["images"])), size=1000, replace=False))
     video = f["images"][video_idx, frame_idx]
     mask = f["tag_masks"][video_idx, frame_idx] * f["loss_masks"][video_idx, frame_idx]
     frames = video * mask
+
 
 # %%
 frames_pca = sklearn.decomposition.PCA(n_components=0.99).fit(frames.reshape(len(frames), -1))
@@ -63,18 +139,32 @@ frame_reps = np.concatenate(frame_reps)
 frame_reps.shape
 
 # %%
+with h5py.File(videos_path, "r") as f:
+    frames = f["images"][:, frame_idx]
+    mask = f["tag_masks"][:, frame_idx] * f["loss_masks"][:, frame_idx]
+    frames = frames * mask
+    del mask
+
+frames = frames.astype(np.float32) / 255
+frames = frames[:, None, :, :]
+
+# %%
 latents = torch.load(latents_path)
 
-with h5py.File(videos_path, "r") as f:
-    labels = f["labels"][:]
-
-model, _, losses = torch.load(model_path)
+model, _, train_losses, val_losses = torch.load(model_path)
 model = model.to(device)
-plt.plot(pd.Series(losses).rolling(1024).mean())
+plt.plot(pd.Series(train_losses).rolling(128).mean())
+plt.plot(pd.Series(val_losses).rolling(128).mean())
 
 # %%
 reps = model.get_representations(
-    latents, batch_size, device  # , aggfunc=lambda ctx: ctx[:, :, ctx.shape[2] // 2]
+    latents,
+    batch_size,
+    device,
+    # aggfunc=lambda ctx: torch.nn.functional.normalize(ctx[:, :, ctx.shape[2] // 2], dim=1, p=2),
+    # aggfunc=lambda ctx: torch.nn.functional.normalize(ctx, dim=1, p=2).mean(dim=-1),
+    # aggfunc=lambda ctx: ctx[:, :, ctx.shape[2] // 2 - 8 : ctx.shape[2] // 2 + 8].mean(dim=-1),
+    aggfunc=lambda ctx: ctx.mean(dim=-1),
 )
 reps.shape
 
@@ -102,176 +192,125 @@ plt.title("Image-CPC -> CPC -> TSNE")
 plt.legend()
 
 # %%
-linear = sklearn.linear_model.LogisticRegression(multi_class="multinomial", max_iter=1000, n_jobs=4)
-sklearn.model_selection.cross_val_score(
-    linear,
-    latents.mean(axis=1),
-    labels,
-    cv=sklearn.model_selection.StratifiedShuffleSplit(),
-    scoring=sklearn.metrics.make_scorer(
-        sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-    ),
-    n_jobs=-1,
-).mean()
+linear = sklearn.linear_model.LogisticRegression(
+    multi_class="multinomial", max_iter=1000, n_jobs=4, class_weight="balanced"
+)
+
+
+def get_scores(X, y, n_splits=12, n_jobs=-1, model=linear, train_size=None):
+    return sklearn.model_selection.cross_val_score(
+        model,
+        X,
+        y,
+        cv=sklearn.model_selection.StratifiedShuffleSplit(n_splits=n_splits, train_size=train_size),
+        scoring=sklearn.metrics.make_scorer(
+            sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
+        ),
+        n_jobs=n_jobs,
+    ).mean()
+
 
 # %%
-linear = sklearn.linear_model.LogisticRegression(multi_class="multinomial", max_iter=1000, n_jobs=4)
-sklearn.model_selection.cross_val_score(
-    linear,
-    reps_pca,
-    labels,
-    cv=sklearn.model_selection.StratifiedShuffleSplit(),
-    scoring=sklearn.metrics.make_scorer(
-        sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-    ),
-    n_jobs=-1,
-).mean()
+get_scores(latents.mean(axis=1), labels).mean()
 
 # %%
-sklearn.model_selection.cross_val_score(
-    sklearn.dummy.DummyClassifier(),
-    reps,
-    labels,
-    cv=sklearn.model_selection.StratifiedShuffleSplit(),
-    scoring=sklearn.metrics.make_scorer(
-        sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-    ),
-).mean()
+get_scores(reps, labels).mean()
+
 # %%
+get_scores(frame_reps, labels).mean()
+
+# %%
+get_scores(frames, labels, n_jobs=4, model=FrameCNNBaseline(labels, device)).mean()
+
+# %%
+get_scores(traj_X, traj_Y).mean()
+
+# %%
+get_scores(reps, labels, model=sklearn.dummy.DummyClassifier()).mean()
+
 
 # %%
 num_samples = []
 scores_latents = []
 scores_cpc = []
 scores_frames = []
-for train_size in np.logspace(1, np.log10(9500), num=15).astype(np.int):
-    score = sklearn.model_selection.cross_val_score(
-        linear,
-        frame_reps,
-        labels,
-        cv=sklearn.model_selection.StratifiedShuffleSplit(train_size=train_size, n_splits=25),
-        scoring=sklearn.metrics.make_scorer(
-            sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-        ),
-        n_jobs=-1,
-    ).mean()
+scores_supervised = []
+scores_trajs = []
+for train_size in progress_bar(
+    np.logspace(1, np.log10(len(frame_reps) - 500), num=20).astype(np.int)
+):
+    score = get_scores(frame_reps, labels, train_size=train_size).mean()
     scores_frames.append(score)
 
-    score = sklearn.model_selection.cross_val_score(
-        linear,
-        reps_pca,
-        labels,
-        cv=sklearn.model_selection.StratifiedShuffleSplit(train_size=train_size, n_splits=25),
-        scoring=sklearn.metrics.make_scorer(
-            sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-        ),
-        n_jobs=-1,
+    score = get_scores(
+        frames, labels, n_jobs=4, model=FrameCNNBaseline(labels, device), train_size=train_size
     ).mean()
+    scores_supervised.append(score)
+
+    score = get_scores(reps, labels, train_size=train_size).mean()
     scores_cpc.append(score)
 
-    score = sklearn.model_selection.cross_val_score(
-        linear,
-        latents.mean(axis=1),
-        labels,
-        cv=sklearn.model_selection.StratifiedShuffleSplit(train_size=train_size, n_splits=25),
-        scoring=sklearn.metrics.make_scorer(
-            sklearn.metrics.roc_auc_score, multi_class="ovo", needs_proba=True
-        ),
-        n_jobs=-1,
-    ).mean()
+    score = get_scores(latents.mean(axis=1), labels, train_size=train_size).mean()
     scores_latents.append(score)
+
+    score = get_scores(traj_X, traj_Y, train_size=train_size).mean()
+    scores_trajs.append(score)
 
     num_samples.append(train_size)
 
 # %%
 plt.figure(figsize=(12, 6))
-plt.plot(num_samples, scores_frames, label="Center Frame (Pixel PCA)")
-plt.plot(num_samples, scores_latents, label="HVAE Latents")
 plt.plot(num_samples, scores_cpc, label="CPC Representations")
+plt.plot(num_samples, scores_latents, label="Center Frame (Image CPC)")
+plt.plot(num_samples, scores_supervised, label="Center Frame (Supervised CNN)")
+plt.plot(num_samples, scores_trajs, label="Trajectory features PCA")
+plt.plot(num_samples, scores_frames, label="Center Frame (Pixel PCA)")
 plt.xlabel("Number of training samples")
 plt.ylabel("Mean ROC AUC (CV)")
-plt.title("Multinomial regression [Dance, Following, Unknown]")
+plt.title("Multinomial regression [Dance, Following, Ventilating, Unknown]")
 plt.grid()
 plt.xlim([min(num_samples), max(num_samples)])
-plt.legend()
-
-import hdbscan
-import sklearn.cluster as cluster
-
-# %%
-import umap
-from sklearn.metrics import adjusted_mutual_info_score
-
-# %%
-clusterable_embedding = umap.UMAP(
-    n_neighbors=30, min_dist=0.0, n_components=2, n_jobs=-1
-).fit_transform(reps_pca)
-
-# %%
-plt.figure(figsize=(12, 6))
-
-colors = sns.color_palette(n_colors=len(Behaviors))
-
-for label in Behaviors:
-    elems = clusterable_embedding[labels == label.value]
-    scatter = plt.scatter(elems[:, 0], elems[:, 1], s=3, c=[colors[label.value]], label=label.name)
-
-plt.title("Image-CPC -> CPC -> UMAP")
-
+plt.ylim([0.5, 1])
 plt.legend()
 
 # %%
-clusters = hdbscan.HDBSCAN(
-    min_samples=10,
-    min_cluster_size=50,
-).fit_predict(clusterable_embedding)
+unknown_idxs = labels == 0
+unknown_reps = reps[unknown_idxs]
 
 # %%
-clustered = clusters >= 0
-plt.scatter(
-    clusterable_embedding[~clustered, 0],
-    clusterable_embedding[~clustered, 1],
-    color=(0.5, 0.5, 0.5),
-    s=0.1,
-    alpha=0.5,
-)
+mixture = sklearn.mixture.BayesianGaussianMixture(n_components=6)
+mixture.fit(unknown_reps)
 
-plt.scatter(
-    clusterable_embedding[clustered, 0],
-    clusterable_embedding[clustered, 1],
-    c=clusters[clustered],
-    s=0.1,
-    cmap="Spectral",
-)
 
 # %%
-adjusted_mutual_info_score(labels[clustered] == Behaviors.DANCE.value, clusters[clustered])
-
-# %%
-adjusted_mutual_info_score(labels[clustered] == Behaviors.FOLLOWING.value, clusters[clustered])
-
-# %%
-
-# %%
-
-# %%
-clusterer = sklearn.mixture.BayesianGaussianMixture(
-    n_components=100, max_iter=1000, n_init=10, weight_concentration_prior=1 / 1000
-)
-clusters = clusterer.fit_predict(reps_pca)
+cluster_probs = mixture.predict_proba(unknown_reps)
+clusters = mixture.predict(unknown_reps)
+cluster_probs = np.stack([cluster_probs[idx, i] for idx, i in enumerate(clusters)])
 
 np.unique(clusters, return_counts=True)
 
 # %%
+reps_2d = umap.UMAP(n_jobs=-1).fit_transform(unknown_reps)
+
+# %%
+plt.figure(figsize=(12, 8))
+plt.scatter(reps_2d[:, 0], reps_2d[:, 1], c=clusters, cmap="Spectral", s=cluster_probs * 5)
+
+# %%
+original_idxs = np.argwhere(unknown_idxs)[:, 0]
+
 for cluster in np.arange(0, clusters.max() + 1):
     print(cluster)
-    mean_rep = reps[clusters == cluster].mean(axis=0)
-    most_similar_idxs = np.linalg.norm(reps - mean_rep[None, :], axis=1).argsort()
+
+    mean_rep = unknown_reps[clusters == cluster].mean(axis=0)
+    most_similar_idxs = np.linalg.norm(unknown_reps - mean_rep[None, :], axis=1).argsort()
+    random_similar_idxs = np.random.choice(most_similar_idxs[:100], size=6)
 
     paths = []
     for i in range(6):
+        idx = original_idxs[most_similar_idxs[i]]
         path = f"/srv/public/benwild/cluster_{cluster}_{i}.mp4"
-        unsupervised_behaviors.data.extract_video(videos_path, most_similar_idxs[i], path)
+        unsupervised_behaviors.data.extract_video(videos_path, idx, path)
         paths.append(path)
 
     filter_str = "[0:v][1:v][2:v]hstack=inputs=3[top];[3:v][4:v][5:v]hstack=inputs=3[bottom];[top][bottom]vstack=inputs=2[v]"
@@ -286,12 +325,15 @@ for cluster in np.arange(0, clusters.max() + 1):
             f"/srv/public/benwild/cluster_{cluster}_grid.mp4",
         ]
     )
-
-# %%
-plt.scatter(
-    embedding[:, 0],
-    embedding[:, 1],
-    c=clusters[:],
-    s=0.1,
-    cmap="Spectral",
-)
+    subprocess.run(
+        ["ffmpeg", "-y"]
+        + [
+            "-i",
+            f"/srv/public/benwild/cluster_{cluster}_grid.mp4",
+            "-vf",
+            "fps=6,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+            "-loop",
+            "0",
+            f"/srv/public/benwild/cluster_{cluster}_grid.gif",
+        ]
+    )
