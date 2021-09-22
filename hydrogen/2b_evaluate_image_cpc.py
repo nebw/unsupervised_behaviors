@@ -51,7 +51,6 @@ data = MaskedFrameDataset(config.videos_path)
 transforms = torchvision.transforms.Compose(
     [
         torchvision.transforms.ToTensor(),
-        torchvision.transforms.RandomHorizontalFlip(),
         torchvision.transforms.Normalize(data.file["mean"][()], data.file["std"][()]),
     ]
 )
@@ -116,7 +115,6 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 cpc_reps = []
 labels = []
 
-
 data_loader = torch.utils.data.DataLoader(
     data,
     batch_size=config.batch_size,
@@ -128,9 +126,14 @@ data_loader = torch.utils.data.DataLoader(
 
 with torch.no_grad():
     for X, y in progress_bar(data_loader, total=len(data_loader)):
-        with torch.cuda.amp.autocast():
-            X_emb, X_ctx = model_parallel(X)
-            clf_input = X_ctx.mean(dim=(-1))
+        X_emb, X_ctx = model_parallel(X)
+
+        clf_input = X_emb.reshape(X.shape[0], num_timesteps, config.num_embeddings, num_timesteps)
+        clf_input = clf_input.transpose(2, 1)
+        clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
+        clf_input = clf_input.mean(dim=(2, 3))
+        # https://stats.stackexchange.com/a/220565
+        clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
 
         cpc_reps.append(clf_input.float().cpu().numpy())
         labels.append(y.cpu().numpy())
