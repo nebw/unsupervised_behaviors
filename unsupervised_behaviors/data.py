@@ -894,3 +894,17 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
             label = self.target_transform(label)
 
         return image, label
+
+    class CenterFrameSampler(torch.utils.data.Sampler):
+        def __init__(self, data_source, num_frames):
+            self.data_source = data_source
+            self.num_frames = num_frames
+
+        def _range(self):
+            return range(self.num_frames // 2, len(self.data_source), self.num_frames)
+
+        def __iter__(self):
+            return iter(self._range())
+
+        def __len__(self) -> int:
+            return len(self._range())

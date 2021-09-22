@@ -116,8 +116,14 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 cpc_reps = []
 labels = []
 
+
 data_loader = torch.utils.data.DataLoader(
-    data, batch_size=config.batch_size, shuffle=False, num_workers=8, pin_memory=True
+    data,
+    batch_size=config.batch_size,
+    shuffle=False,
+    num_workers=8,
+    pin_memory=True,
+    sampler=MaskedFrameDataset.CenterFrameSampler(data, 65),
 )
 
 with torch.no_grad():
