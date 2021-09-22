@@ -16,7 +16,6 @@ import umap
 from fastprogress.fastprogress import force_console_behavior
 
 from unsupervised_behaviors.constants import Behaviors
-from unsupervised_behaviors.cpc.model import ColumnImageConvCPC
 from unsupervised_behaviors.data import MaskedFrameDataset
 
 from shared.plotting import setup_matplotlib

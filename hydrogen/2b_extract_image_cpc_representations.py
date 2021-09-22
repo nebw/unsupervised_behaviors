@@ -4,10 +4,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import sklearn
-import sklearn.linear_model
-import sklearn.metrics
-import sklearn.model_selection
 import torch
 import torchvision
 from fastprogress.fastprogress import force_console_behavior

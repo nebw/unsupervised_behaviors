@@ -3,22 +3,16 @@ import datetime
 import json
 import pathlib
 
-import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import skimage.draw
 from fastprogress.fastprogress import force_console_behavior
 
 import bb_behavior
 import bb_behavior.db
 import bb_behavior.io
 import bb_tracking.types
-
-import unsupervised_behaviors
-import unsupervised_behaviors.data
-from unsupervised_behaviors.constants import Behaviors
 
 from shared.plotting import setup_matplotlib
 
