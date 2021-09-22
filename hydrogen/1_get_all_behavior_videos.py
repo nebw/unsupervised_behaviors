@@ -28,9 +28,9 @@ video_manager = bb_behavior.io.videos.BeesbookVideoManager(
 )
 
 # %%
-num_videos_total = 10000
-num_videos_dance = 1000
-num_videos_following = 1000
+num_videos_total = 5000
+num_videos_dance = 1500
+num_videos_following = 1500
 num_videos_ventilating = 180
 num_videos_behaviors = num_videos_dance + num_videos_following + num_videos_ventilating
 num_frames_around = 32
@@ -39,7 +39,7 @@ use_clahe = True
 
 output_path = (
     f"/srv/public/benwild/predictive/videos_2019_{num_videos_total}videos_"
-    + f"{num_frames_around}frames_allbehaviors.h5"
+    + f"{num_frames_around}frames_allbehaviors_fixed.h5"
 )
 data.create_video_h5(output_path, num_videos_total, num_frames_around)
 
@@ -157,5 +157,21 @@ with h5py.File(output_path, "r") as f:
     plt.imshow(images[num_videos_total - 1, 0], cmap=plt.cm.gray)
     plt.show()
 
+
+# %%
+with h5py.File(output_path, "r+") as f:
+    images = f["images"]
+
+    idxs = np.array(sorted(np.random.choice(list(range(len(images))), replace=False, size=1024)))
+    sample = images[idxs]
+
+# %%
+with h5py.File(output_path, "r+") as f:
+    f["mean"] = sample.mean()
+    f["std"] = sample.std()
+
 # %%
 data.extract_video(output_path, -1, "/srv/public/benwild/test.mp4")
+
+# %%
+output_path
