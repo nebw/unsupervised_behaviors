@@ -6,6 +6,7 @@ import sys
 from typing import Iterable, List, Set, Tuple
 
 import h5py
+import hdf5plugin
 import joblib
 import numpy as np
 import pandas as pd
@@ -569,9 +570,9 @@ def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: i
         shape = (num_videos, num_frames_around * 2 + 1, 128, 128)
         chunks = (1, num_frames_around * 2 + 1, 128, 128)
 
-        f.create_dataset("images", shape, chunks=chunks, dtype="u8", compression="lzf")
-        f.create_dataset("tag_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
-        f.create_dataset("loss_masks", shape, chunks=chunks, dtype=bool, compression="lzf")
+        f.create_dataset("images", shape, chunks=chunks, dtype="u8", **hdf5plugin.Zstd())
+        f.create_dataset("tag_masks", shape, chunks=chunks, dtype=bool, **hdf5plugin.Zstd())
+        f.create_dataset("loss_masks", shape, chunks=chunks, dtype=bool, **hdf5plugin.Zstd())
         f.create_dataset("frame_ids", (num_videos, num_frames_around * 2 + 1), dtype=np.uint)
         f.create_dataset("x_pos", (num_videos, num_frames_around * 2 + 1), dtype=np.float32)
         f.create_dataset("y_pos", (num_videos, num_frames_around * 2 + 1), dtype=np.float32)

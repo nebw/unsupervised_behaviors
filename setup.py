@@ -21,6 +21,8 @@ setuptools.setup(
     license="MIT",
     python_requires=">=3.6",
     install_requires=[
+        "hdf5",
+        "hdf5plugin",
         "numpy",
         "pandas",
         "scikit-image",
