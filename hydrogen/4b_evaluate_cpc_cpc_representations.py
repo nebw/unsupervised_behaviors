@@ -25,7 +25,7 @@ import bb_behavior.db
 from bb_behavior.trajectory.features import FeatureTransform
 
 import unsupervised_behaviors.data
-from unsupervised_behaviors.baselines import FrameCNNBaseline
+from unsupervised_behaviors.baselines import FrameCNN, SkorchBaseline, TrajectoryCNN
 from unsupervised_behaviors.constants import Behaviors
 
 from shared.plotting import setup_matplotlib
@@ -92,7 +92,7 @@ features = [FeatureTransform.Angle2Geometric(), FeatureTransform.Egomotion()]
 data_reader = bb_behavior.trajectory.features.DataReader(
     dataframe=truth_df,
     use_hive_coords=True,
-    frame_margin=8,
+    frame_margin=32,
     target_column="label",
     feature_procs=features,
     sample_count=None,
@@ -100,12 +100,20 @@ data_reader = bb_behavior.trajectory.features.DataReader(
     n_threads=4,
 )
 
+print(len(data_reader.X))
+
+data_reader.X.shape
+
+# %%
+
 data_reader.create_features()
 
-traj_X = sklearn.decomposition.PCA(n_components=0.99).fit_transform(
-    data_reader.X.reshape(len(data_reader.X), -1)
-)
+traj_X = data_reader.X
 traj_Y = data_reader.Y.astype(int)[:, 0]
+
+traj_X_pca = sklearn.decomposition.PCA(n_components=0.99).fit_transform(
+    traj_X.reshape(len(traj_X), -1)
+)
 
 # %%
 frame_idx = 32
@@ -220,10 +228,13 @@ get_scores(reps, labels).mean()
 get_scores(frame_reps, labels).mean()
 
 # %%
-get_scores(frames, labels, n_jobs=4, model=FrameCNNBaseline(labels, device)).mean()
+get_scores(frames, labels, n_jobs=4, model=SkorchBaseline(labels, device, FrameCNN)).mean()
 
 # %%
-get_scores(traj_X, traj_Y).mean()
+get_scores(traj_X_pca, traj_Y).mean()
+
+# %%
+get_scores(traj_X, traj_Y, n_jobs=4, model=SkorchBaseline(labels, device, TrajectoryCNN)).mean()
 
 # %%
 get_scores(reps, labels, model=sklearn.dummy.DummyClassifier()).mean()
@@ -236,6 +247,7 @@ scores_cpc = []
 scores_frames = []
 scores_supervised = []
 scores_trajs = []
+scores_trajs_cnn = []
 for train_size in progress_bar(
     np.logspace(1, np.log10(len(frame_reps) - 500), num=20).astype(np.int)
 ):
@@ -243,7 +255,11 @@ for train_size in progress_bar(
     scores_frames.append(score)
 
     score = get_scores(
-        frames, labels, n_jobs=4, model=FrameCNNBaseline(labels, device), train_size=train_size
+        frames,
+        labels,
+        n_jobs=4,
+        model=SkorchBaseline(labels, device, FrameCNN),
+        train_size=train_size,
     ).mean()
     scores_supervised.append(score)
 
@@ -253,8 +269,17 @@ for train_size in progress_bar(
     score = get_scores(latents.mean(axis=1), labels, train_size=train_size).mean()
     scores_latents.append(score)
 
-    score = get_scores(traj_X, traj_Y, train_size=train_size).mean()
+    score = get_scores(traj_X_pca, traj_Y, train_size=train_size).mean()
     scores_trajs.append(score)
+
+    score = get_scores(
+        traj_X,
+        traj_Y,
+        n_jobs=4,
+        model=SkorchBaseline(labels, device, TrajectoryCNN),
+        train_size=train_size,
+    ).mean()
+    scores_trajs_cnn.append(score)
 
     num_samples.append(train_size)
 
@@ -262,6 +287,7 @@ for train_size in progress_bar(
 plt.figure(figsize=(12, 6))
 plt.plot(num_samples, scores_cpc, label="CPC Representations")
 plt.plot(num_samples, scores_latents, label="Center Frame (Image CPC)")
+plt.plot(num_samples, scores_trajs_cnn, label="Trajectory features (Supervised CNN)")
 plt.plot(num_samples, scores_supervised, label="Center Frame (Supervised CNN)")
 plt.plot(num_samples, scores_trajs, label="Trajectory features PCA")
 plt.plot(num_samples, scores_frames, label="Center Frame (Pixel PCA)")

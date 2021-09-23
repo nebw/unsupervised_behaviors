@@ -6,6 +6,61 @@ import torch
 from unsupervised_behaviors.constants import Behaviors
 
 
+class TrajectoryCNN(torch.nn.Module):
+    def __init__(self, num_classes=len(Behaviors), num_features=6, num_initial_hidden=16):
+        super().__init__()
+
+        self.cnn = torch.nn.Sequential(
+            torch.nn.Conv1d(num_features, num_initial_hidden, kernel_size=3, stride=1, padding=1),
+            torch.nn.BatchNorm1d(num_initial_hidden),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(
+                num_initial_hidden, num_initial_hidden * 2 ** 1, kernel_size=3, stride=1, padding=1
+            ),
+            torch.nn.BatchNorm1d(num_initial_hidden * 2 ** 1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(
+                num_initial_hidden * 2 ** 1,
+                num_initial_hidden * 2 ** 2,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            torch.nn.BatchNorm1d(num_initial_hidden * 2 ** 2),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(
+                num_initial_hidden * 2 ** 2,
+                num_initial_hidden * 2 ** 3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            torch.nn.BatchNorm1d(num_initial_hidden * 2 ** 3),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(
+                num_initial_hidden * 2 ** 3,
+                num_initial_hidden * 2 ** 4,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            torch.nn.BatchNorm1d(num_initial_hidden * 2 ** 4),
+            torch.nn.ReLU(),
+        )
+
+        self.clf = torch.nn.Linear(num_initial_hidden * 2 ** 4, num_classes)
+
+    def forward(self, X, **kwargs):
+        X = self.cnn(X)
+        X = X.mean(dim=-1)
+        pred = self.clf(X)
+        return pred
+
+
 class FrameCNN(torch.nn.Module):
     def __init__(self, num_classes=len(Behaviors), num_image_channels=1, num_initial_hidden=8):
         super().__init__()
@@ -65,7 +120,7 @@ class FrameCNN(torch.nn.Module):
         return pred
 
 
-def FrameCNNBaseline(labels, device, cnn_kwargs={}):
+def SkorchBaseline(labels, device, model, model_kwargs={}, skorch_kwargs={}):
     class_weights = torch.from_numpy(
         sklearn.utils.class_weight.compute_class_weight(
             "balanced", classes=np.unique(labels), y=labels
@@ -77,7 +132,7 @@ def FrameCNNBaseline(labels, device, cnn_kwargs={}):
         return sklearn.metrics.roc_auc_score(y_true, y_pred, multi_class="ovo")
 
     net = skorch.NeuralNetClassifier(
-        lambda: FrameCNN(**cnn_kwargs),
+        lambda: model(**model_kwargs),
         optimizer=torch.optim.AdamW,
         lr=0.001,
         max_epochs=100,
@@ -100,6 +155,7 @@ def FrameCNNBaseline(labels, device, cnn_kwargs={}):
         train_split=skorch.dataset.CVSplit(0.1, stratified=True),
         warm_start=False,
         verbose=True,
+        **skorch_kwargs,
     )
 
     return net
