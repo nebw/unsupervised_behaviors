@@ -5,7 +5,12 @@ import torch
 import torchtyping
 from torchtyping import TensorType  # type: ignore
 
-from unsupervised_behaviors.cpc.layers import Contexter, Embedder, ImageResidualBlock
+from unsupervised_behaviors.cpc.layers import (
+    Contexter,
+    Embedder,
+    ImageResidualBlock,
+    VideoResidualBlock,
+)
 from unsupervised_behaviors.cpc.loss import nt_xent_loss
 from unsupervised_behaviors.types import batch, channels, horizontal, time, vertical
 
@@ -276,3 +281,45 @@ class ColumnImageConvCPC(ImageConvCPC):
         X_tiles = X_tiles.transpose(2, 1)
 
         return ConvCPC.forward(self, X_tiles)
+
+
+class VideoConvCPC(ConvCPC):
+    def __init__(
+        self,
+        num_channels: int,
+        num_features: int,
+        num_video_residual_blocks: int,
+        frn_norm: bool = True,
+        pre_convolutions=None,
+        aggfunc=lambda x: x.mean(dim=(3, 4)),
+        **kwargs,
+    ):
+        super().__init__(num_features=num_features, **kwargs)
+
+        self.aggfunc = aggfunc
+        self.num_channels = num_channels
+        self.pre_convolutions = pre_convolutions
+        if self.pre_convolutions is None:
+            self.pre_convolutions = (
+                torch.nn.Conv3d(num_channels, num_features, padding=0, kernel_size=(1, 3, 3)),
+            )
+        self.convolutions = torch.nn.Sequential(
+            *(
+                VideoResidualBlock(
+                    num_features, padding=0, kernel_size=(1, 3, 3), frn_norm=frn_norm
+                )
+                for _ in range(num_video_residual_blocks)
+            ),
+        )
+
+        for m in self.modules():
+            if isinstance(m, torch.nn.Conv3d):
+                torch.nn.init.kaiming_normal_(m.weight, mode="fan_out")
+                torch.nn.init.zeros_(m.bias)
+
+    def forward(self, X):
+        X = self.pre_convolutions(X)
+        X = self.convolutions(X)
+        X = self.aggfunc(X)
+
+        return super().forward(X)

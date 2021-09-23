@@ -284,3 +284,36 @@ class ImageResidualBlock(torch.nn.Module):
         crop = (x_.shape[-1] - x.shape[-1]) // 2
 
         return x_[:, :, crop:-crop, crop:-crop] + x
+
+
+class VideoResidualBlock(torch.nn.Module):
+    def __init__(self, channels, padding, kernel_size, frn_norm=True, **kwargs):
+        super().__init__()
+
+        self.conv1 = torch.nn.Conv3d(channels, channels, padding=padding, kernel_size=kernel_size)
+        self.conv2 = torch.nn.Conv3d(channels, channels, padding=padding, kernel_size=kernel_size)
+
+        if frn_norm:
+            self.frn_norm_1 = FilterResponseNorm3d(channels)
+            self.frn_norm_2 = FilterResponseNorm3d(channels)
+
+        self.frn_norm = frn_norm
+
+    def forward(self, x):
+        x_ = x
+
+        if self.frn_norm:
+            x = self.frn_norm_1(x)
+        else:
+            x = torch.nn.functional.leaky_relu(x)
+        x = self.conv1(x)
+
+        if self.frn_norm:
+            x = self.frn_norm_2(x)
+        else:
+            x = torch.nn.functional.leaky_relu(x)
+        x = self.conv2(x)
+
+        crop = (x_.shape[-1] - x.shape[-1]) // 2
+
+        return x_[:, :, :, crop:-crop, crop:-crop] + x

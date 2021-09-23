@@ -908,3 +908,64 @@ class MaskedFrameDataset(torch.utils.data.Dataset):
 
         def __len__(self) -> int:
             return len(self._range())
+
+
+class MaskedVideoDataset(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        path,
+        transform=None,
+        target_transform=None,
+        ellipse_masked=True,
+        tag_masked=True,
+        horizontal_crop=None,
+    ):
+        self.file = h5py.File(path, "r")
+
+        self.mean = self.file["mean"][()]
+
+        self.images = self.file["images"]
+        self.tag_masks = self.file["tag_masks"]
+        self.loss_masks = self.file["loss_masks"]
+        self.labels = self.file["labels"]
+        self.ellipse_masked = ellipse_masked
+        self.tag_masked = tag_masked
+        self.horizontal_crop = horizontal_crop
+
+        self.transform = transform
+        self.target_transform = target_transform
+
+        assert self.images.ndim == 4
+
+    def __len__(self):
+        return len(self.images)
+
+    def apply_masks(self, images, idx):
+        def _apply_mask(images, mask_dset):
+            mask = mask_dset[idx]
+            return images * mask + (1 - mask) * self.mean
+
+        if self.tag_masked:
+            images = _apply_mask(images, self.tag_masks)
+
+        if self.ellipse_masked:
+            images = _apply_mask(images, self.loss_masks)
+
+        return images
+
+    def __getitem__(self, idx):
+        images = self.images[idx]
+        images = self.apply_masks(images, idx)
+        label = self.labels[idx]
+
+        if self.horizontal_crop is not None:
+            images = images[:, :, self.horizontal_crop : -self.horizontal_crop]
+
+        images = np.expand_dims(images, 0).astype(np.float32)
+
+        if self.transform:
+            images = self.transform(images)
+        if self.target_transform:
+            label = self.target_transform(label)
+
+        return images, label
