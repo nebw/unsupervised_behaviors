@@ -129,6 +129,8 @@ def SkorchBaseline(labels, device, model, model_kwargs={}, skorch_kwargs={}):
 
     def roc_auc(net, X, y_true):
         y_pred = net.predict_proba(X)
+        if y_pred.shape[1] == 2:
+            y_pred = y_pred[:, 1]
         return sklearn.metrics.roc_auc_score(y_true, y_pred, multi_class="ovo")
 
     net = skorch.NeuralNetClassifier(

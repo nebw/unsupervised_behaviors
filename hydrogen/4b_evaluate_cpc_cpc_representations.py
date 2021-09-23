@@ -300,6 +300,33 @@ plt.ylim([0.5, 1])
 plt.legend()
 
 # %%
+results = []
+
+for behavior in Behaviors:
+    score = get_scores(reps, (labels == behavior.value).astype(np.int)).mean()
+    results.append(dict(model="CPC Representations", roc_auc=score, behavior=behavior.name))
+
+    score = get_scores(
+        traj_X,
+        (traj_Y == behavior.value).astype(np.int),
+        n_jobs=4,
+        model=SkorchBaseline(
+            (labels == behavior.value).astype(np.int),
+            device,
+            TrajectoryCNN,
+            model_kwargs={"num_classes": 2},
+        ),
+    ).mean()
+    results.append(
+        dict(model="Trajectory Features (Supervised)", roc_auc=score, behavior=behavior.name)
+    )
+
+results = pd.DataFrame(results)
+
+# %%
+results.pivot_table(index="model", columns="behavior")
+
+# %%
 unknown_idxs = labels == 0
 unknown_reps = reps[unknown_idxs]
 
