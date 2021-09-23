@@ -29,7 +29,10 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
 # %%
 devices = list(range(torch.cuda.device_count()))
 device = f"cuda:{devices[0]}"
-batch_size = 8 * len(devices)
+batch_size = 16 * len(devices)
+num_accumulated_batches = 8
+
+print(batch_size * num_accumulated_batches)
 
 # %%
 videos_path = "/srv/public/benwild/predictive/videos_2019_25000videos_32frames_random.h5"
@@ -72,8 +75,8 @@ val_data_loader = torch.utils.data.DataLoader(
 
 # %%
 num_timesteps = data[0][0].shape[1]
-pre_convolutions = (
-    torch.nn.Conv3d(1, 64, padding=0, kernel_size=(1, 5, 5)),
+pre_convolutions = torch.nn.Sequential(
+    torch.nn.Conv3d(1, 64, padding=0, kernel_size=(1, 7, 7)),
     torch.nn.AvgPool3d((1, 2, 2)),
 )
 model = VideoConvCPC(
@@ -84,7 +87,6 @@ model = VideoConvCPC(
     num_context=128,
     num_ahead=32,
     pre_convolutions=pre_convolutions,
-    aggfunc=lambda x: print(x.shape),
     num_ahead_subsampling=2,
     subsample_length=num_timesteps,
     embedder_params={"num_residual_blocks_pre": 6, "num_residual_blocks": 0},
@@ -103,10 +105,6 @@ optimizer = madgrad.MADGRAD(model.parameters(), lr=learning_rate, weight_decay=w
 x, _ = next(iter(train_data_loader))
 
 # %%
-model(x[:4].to(device))[0].shape
-
-
-# %%
 train_losses = []
 val_losses = []
 
@@ -122,10 +120,24 @@ def load_batch(data_loader):
         yield X
 
 
-def run_batch(data_generator):
-    X = next(data_generator)
+def run_batch(data_generator, num_accumulated_batches=1):
+    X_embs = []
+    X_ctxs = []
+    for i in range(num_accumulated_batches):
+        X = next(data_generator)
+        X_emb, X_ctx = model_parallel(X)
 
-    X_emb, X_ctx = model_parallel(X)
+        if i < num_accumulated_batches - 1:
+            X_emb = X_emb.detach()
+            X_ctx = X_ctx.detach()
+            model_parallel.zero_grad()
+
+        X_embs.append(X_emb)
+        X_ctxs.append(X_ctx)
+
+    X_emb = torch.cat(X_embs)
+    X_ctx = torch.cat(X_ctxs)
+
     batch_loss = model.cpc_loss(X_emb, X_ctx)
 
     return batch_loss
@@ -142,9 +154,9 @@ for _ in range(num_batches - len(train_losses)):
 
     try:
         with torch.no_grad():
-            val_loss = run_batch(val_generator)
+            val_loss = run_batch(val_generator, num_accumulated_batches)
 
-        train_loss = run_batch(train_generator)
+        train_loss = run_batch(train_generator, num_accumulated_batches)
     except RuntimeError as err:
         print(err)
         continue
