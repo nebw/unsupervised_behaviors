@@ -118,10 +118,9 @@ with torch.no_grad():
         clf_input = clf_input.transpose(2, 1)
         clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
         clf_input = clf_input.mean(dim=(2, 3))
-        # https://stats.stackexchange.com/a/220565
-        clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
 
-        cpc_reps.append(clf_input.float().cpu().numpy())
+        # TODO: save as hdf5
+        cpc_reps.append(clf_input.half().cpu().numpy())
         labels.append(y.cpu().numpy())
 
 cpc_reps = np.concatenate(cpc_reps)
