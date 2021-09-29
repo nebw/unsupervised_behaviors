@@ -21,7 +21,7 @@ setuptools.setup(
     license="MIT",
     python_requires=">=3.6",
     install_requires=[
-        "hdf5",
+        "h5py",
         "hdf5plugin",
         "numpy",
         "pandas",
@@ -29,10 +29,17 @@ setuptools.setup(
         "scikit-learn",
         "torch",
         "torchvision",
-        "bb_behavior @ git+ssh://git@github.com/BioroboticsLab/bb_behavior.git#egg=master",
-        "bb_tracking @ git+ssh://git@github.com/walachey/bb_tracking.git#egg=master",
-        "hierarchical_vae @ git+ssh://git@github.com/nebw/hierarchical_vae.git#egg=master",
-        "bb_pipeline @ git+ssh://git@github.com/BioroboticsLab/bb_pipeline.git#egg=master",
+        "torchtyping",
         "pytest",
     ],
+    extras_require={
+        "beesbook_data": [
+            "bb_behavior @ git+ssh://git@github.com/BioroboticsLab/bb_behavior.git#egg=master",
+            "bb_tracking @ git+ssh://git@github.com/walachey/bb_tracking.git#egg=master",
+            "bb_pipeline @ git+ssh://git@github.com/BioroboticsLab/bb_pipeline.git#egg=master",
+        ],
+        "vae_model": [
+            "hierarchical_vae @ git+ssh://git@github.com/nebw/hierarchical_vae.git#egg=master",
+        ],
+    },
 )
