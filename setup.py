@@ -5,7 +5,7 @@ with open("README.md") as fh:
 
 setuptools.setup(
     name="unsupervised_behaviors",
-    version="0.0.1",
+    version="0.1.0",
     author="Benjamin Wild",
     author_email="b.w@fu-berlin.de",
     url="https://github.com/nebw/unsupervised_behaviors/",
