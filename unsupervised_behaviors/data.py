@@ -698,6 +698,72 @@ def get_random_detection_trajectory_generator(
         yield get_track_detections_from_frame_container(fc_ids.pop(), num_frames)
 
 
+def get_wdd_truth_events(gt_path: str, event_label: str):
+    """Load human annotated WDD truth events (waggles, following, and nothing), group them into
+    discrete events (e.g. waggles instead of single frames), and transform data s.t. it can be used
+    by `get_event_detection_trajectory_generator`.
+
+    Parameters
+    ----------
+    gt_path: str
+        Location of WDD truth pickle file.
+    event_label: str
+        Either 'waggle', 'following', or 'nothing'.
+
+    Returns
+    -------
+    pd.DataFrame
+        Event DataFrame usable by `get_event_detection_trajectory_generator`.
+    """
+    all_samples_df = pd.read_pickle(gt_path)
+    all_samples_df["group"] = all_samples_df.timestamp.apply(lambda t: t // (60 * 60)).astype(
+        np.int
+    )
+    df = all_samples_df[all_samples_df.label == event_label]
+
+    # df has one row for each frame, group consecutive frames of same bee_id into discrete
+    # events
+    events = []
+    threshold = datetime.timedelta(seconds=1 / 5)
+    for bee_id, group in df.groupby("bee_id"):
+        rows = []
+        for idx, row in group.sort_values("datetime").iterrows():
+            if not len(rows):
+                rows.append(row)
+            else:
+                td = row.datetime - rows[-1].datetime
+                if td >= threshold:
+                    events.append(pd.DataFrame(rows))
+                    rows = []
+                rows.append(row)
+        if not len(rows):
+            events.append(rows)
+
+    def parse_event(event_group):
+        event = event_group.iloc[len(event_group) // 2].copy()
+        event["from"] = event_group.iloc[0].datetime
+        event["to"] = event_group.iloc[-1].datetime
+        return event
+
+    # load center frame, and start and end time of events
+    events_df = pd.DataFrame(list(map(parse_event, events)))
+
+    # load cam_id for each event
+    with bb_behavior.db.get_database_connection(application_name=APPLICATION_NAME) as con:
+        fc_df = pd.read_sql(
+            f"""
+                SELECT frame_id, cam_id
+                FROM {bb_behavior.db.get_frame_metadata_tablename()}
+                WHERE frame_id IN {tuple(map(int, set(events_df.frame_id)))}
+            """,
+            coerce_float=False,
+            con=con,
+        )
+    events_df = events_df.merge(fc_df, on="frame_id")
+
+    return events_df
+
+
 def load_and_store_videos(
     h5_path: pathlib.Path,
     trajectory_generator: Iterable[pd.DataFrame],
