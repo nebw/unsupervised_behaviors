@@ -294,22 +294,34 @@ class VideoResidualBlock(torch.nn.Module):
         self.conv2 = torch.nn.Conv3d(channels, channels, padding=padding, kernel_size=kernel_size)
 
         if frn_norm:
-            self.frn_norm_1 = FilterResponseNorm3d(channels)
-            self.frn_norm_2 = FilterResponseNorm3d(channels)
+            self.frn_norm_1 = FilterResponseNorm2d(channels)
+            self.frn_norm_2 = FilterResponseNorm2d(channels)
 
         self.frn_norm = frn_norm
+
+    @staticmethod
+    def apply_frn(frn_norm, x):
+        orig_shape = x.shape
+
+        x = x.transpose(1, 2)
+        x = x.reshape(x.shape[0] * x.shape[1], *x.shape[2:])
+        x = frn_norm(x)
+        x = x.reshape(orig_shape[0], orig_shape[2], orig_shape[1], *orig_shape[3:])
+        x = x.transpose(1, 2)
+
+        return x
 
     def forward(self, x):
         x_ = x
 
         if self.frn_norm:
-            x = self.frn_norm_1(x)
+            x = self.apply_frn(self.frn_norm_1, x)
         else:
             x = torch.nn.functional.leaky_relu(x)
         x = self.conv1(x)
 
         if self.frn_norm:
-            x = self.frn_norm_2(x)
+            x = self.apply_frn(self.frn_norm_2, x)
         else:
             x = torch.nn.functional.leaky_relu(x)
         x = self.conv2(x)
