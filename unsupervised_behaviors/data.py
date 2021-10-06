@@ -571,7 +571,7 @@ def get_event_detection_trajectory_generator(
             try:
                 yield convert_bb_behavior_trajectories(results)
             except Exception as err:
-                logging.getLogger().warning(f"Error loading event: {event} - {err}")
+                logging.getLogger().warning(f"Error loading events: {results} - {err}")
 
 
 def create_video_h5(h5_path: pathlib.Path, num_videos: int, num_frames_around: int):
