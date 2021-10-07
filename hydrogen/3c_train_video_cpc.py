@@ -205,7 +205,80 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 eval_videos_path = (
     "/srv/public/benwild/predictive/videos_2019_5000videos_32frames_allbehaviors_fixed.h5"
 )
-eval_data = MaskedVideoDataset(eval_videos_path, ellipse_masked=False, transform=transforms)
+eval_data = MaskedVideoDataset(
+    eval_videos_path, ellipse_masked=False, tag_masked=True, transform=transforms
+)
+
+# %%
+from captum.attr import IntegratedGradients, NoiseTunnel, visualization
+
+# %%
+data_loader = torch.utils.data.DataLoader(
+    eval_data, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
+)
+x, y = next(iter(data_loader))
+x.shape
+
+# %%
+class MeanModel(torch.nn.Module):
+    def __init__(self, model: torch.nn.Module, model_output_fun=None):
+        super().__init__()
+
+        self.model = model
+        self.model_output_fun = model_output_fun
+
+    def forward(self, *args, **kwargs):
+        outputs = self.model(*args, **kwargs)
+
+        if self.model_output_fun is not None:
+            outputs = self.model_output_fun(outputs)
+
+        return outputs.mean(dim=tuple(range(1, outputs.ndim)))
+
+
+mmodel = MeanModel(
+    model.to("cpu"),
+    lambda o: torch.abs(o[1]),
+    # lambda o: torch.nn.functional.normalize(o[1], dim=1, p=2)
+)
+
+mmodel(x[:1])
+
+# %%
+ig = IntegratedGradients(mmodel.to("cpu"))
+# nt = NoiseTunnel(ig)
+
+# %%
+with torch.no_grad():
+    # attributions = nt.attribute((x[:1],), internal_batch_size=10, nt_type='smoothgrad_sq', nt_samples=1, stdevs=1.)[0]
+    attributions = ig.attribute((x[:1],), internal_batch_size=1)[0]
+
+# %%
+attributions.sum(dim=(0, 1, 3, 4))
+
+# %%
+fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+ax[0].imshow(x[0, 0, x.shape[2] // 2], cmap=plt.cm.gray)
+im = ax[1].imshow(attributions[0, 0, attributions.shape[2] // 2])
+
+# %%
+frame_idx = 18
+plt.imshow(x[0, 0, frame_idx].numpy()[:, :, None], cmap=plt.cm.gray)
+plt.show()
+
+_ = visualization.visualize_image_attr(
+    attributions[0, 0, frame_idx].numpy()[:, :, None],
+    x[0, 0, frame_idx].numpy()[:, :, None],
+    method="blended_heat_map",
+    sign="absolute_value",
+    show_colorbar=True,
+    # outlier_perc=10,
+    title="Overlayed Integrated Gradients",
+)
+plt.show()
+
+# %%
+model = model.to(device)
 
 # %%
 cpc_reps = []
@@ -218,8 +291,8 @@ data_loader = torch.utils.data.DataLoader(
 with torch.no_grad():
     for X, y in progress_bar(data_loader, total=len(data_loader)):
         X_emb, X_ctx = model_parallel(X)
-        # clf_input = torch.nn.functional.normalize(X_ctx, dim=1, p=2)
-        clf_input = X_ctx
+        clf_input = torch.nn.functional.normalize(X_ctx, dim=1, p=2)
+        # clf_input = X_ctx
         # clf_input = clf_input[:, :, clf_input.shape[-1] // 2]
         clf_input = clf_input.mean(dim=-1)
 
@@ -233,7 +306,16 @@ labels = np.concatenate(labels)
 cpc_reps.shape
 
 # %%
-linear = sklearn.linear_model.LogisticRegression(multi_class="multinomial", max_iter=1000, n_jobs=4)
+linear = sklearn.pipeline.make_pipeline(
+    sklearn.preprocessing.StandardScaler(),
+    sklearn.linear_model.LogisticRegression(
+        C=1e3,
+        multi_class="multinomial",
+        class_weight="balanced",
+        max_iter=10000,
+        n_jobs=4,
+    ),
+)
 
 score = sklearn.model_selection.cross_val_score(
     linear,
@@ -246,3 +328,91 @@ score = sklearn.model_selection.cross_val_score(
     n_jobs=-1,
 ).mean()
 score
+
+# %%
+logreg = sklearn.linear_model.LogisticRegression(
+    C=1e3,
+    multi_class="multinomial",
+    class_weight="balanced",
+    max_iter=10000,
+    n_jobs=4,
+)
+logreg.fit(cpc_reps, labels)
+
+# %%
+from unsupervised_behaviors.constants import Behaviors
+
+# %%
+indices = np.argsort(logreg.coef_[Behaviors.DANCE.value])
+coeffs = torch.from_numpy(logreg.coef_[Behaviors.DANCE.value])
+
+coeffs
+# %%
+mmodel = MeanModel(
+    model.to("cpu"),
+    lambda o: torch.nn.functional.normalize(o[1], dim=1, p=2) * coeffs[None, :, None],
+)
+
+mmodel(x[:1])
+ig = IntegratedGradients(mmodel.to("cpu"))
+
+with torch.no_grad():
+    attributions = ig.attribute((x[:1],), internal_batch_size=1)[0]
+
+# %%
+frame_idx = 5
+
+attrib = attributions[0, 0, frame_idx].numpy()[:, :, None]
+max_val = np.abs(attrib).max()
+
+fig, ax = plt.subplots(figsize=(10, 8))
+
+plt.imshow(x[0, 0, frame_idx].numpy()[:, :, None], cmap="gray")
+plt.imshow(
+    attributions[0, 0, frame_idx].numpy()[:, :, None],
+    vmin=-1 * max_val,
+    vmax=max_val,
+    cmap="coolwarm_r",
+    alpha=0.5,
+)
+plt.colorbar()
+
+# %%
+_ = visualization.visualize_image_attr(
+    attributions[0, 0, frame_idx].numpy()[:, :, None],
+    x[0, 0, frame_idx].numpy()[:, :, None],
+    method="blended_heat_map",
+    sign="all",
+    show_colorbar=True,
+    # outlier_perc=10,
+    title="Overlayed Integrated Gradients",
+)
+plt.show()
+
+# %%
+frame_idx = 6
+
+_ = visualization.visualize_image_attr(
+    attributions[0, 0, frame_idx].numpy()[:, :, None],
+    x[0, 0, frame_idx].numpy()[:, :, None],
+    method="blended_heat_map",
+    sign="all",
+    show_colorbar=True,
+    # outlier_perc=10,
+    title="Overlayed Integrated Gradients",
+)
+plt.show()
+
+# %%
+frame_idx = 7
+
+_ = visualization.visualize_image_attr(
+    attributions[0, 0, frame_idx].numpy()[:, :, None],
+    x[0, 0, frame_idx].numpy()[:, :, None],
+    method="blended_heat_map",
+    sign="all",
+    show_colorbar=True,
+    # outlier_perc=10,
+    title="Overlayed Integrated Gradients",
+)
+plt.show()
