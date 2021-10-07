@@ -26,7 +26,7 @@ from shared.plotting import setup_matplotlib
 setup_matplotlib()
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
 
 
 # %%
@@ -34,9 +34,8 @@ wandb.init(project="unsupervised_behaviors", entity="nebw")
 config = wandb.config
 
 # %%
-config.videos_path = "/storage/mi/jennyonline/data/videos_2019_10000.h5"
-# config.frame_path = "/srv/data/benwild/predictive/data/data_2020_100000_unbiased.h5"
-model_path = "/srv/data/benwild/data/unsupervised_behaviors/image_cpc_20210916.pt"
+config.videos_path = "/srv/public/benwild/predictive/videos_2019_25000videos_32frames_random.h5"
+config.model_path = "/srv/data/benwild/data/unsupervised_behaviors/random_image_cpc_20210921.pt"
 
 # %%
 data = MaskedFrameDataset(config.videos_path)
@@ -79,14 +78,15 @@ config.num_image_channels = 1
 
 config.learning_rate = 0.001
 config.weight_decay = 1e-5
+config.max_norm = 1
 
 config.tile_size = 32
 
-devices = 0
+devices = list(range(torch.cuda.device_count()))
 device = f"cuda:{devices[0]}"
-config.batch_size = 18 * len(devices)
+config.batch_size = 16 * len(devices)
 
-config.num_batches = 20000
+config.num_batches = 50000
 
 # %%
 with torch.no_grad():
@@ -129,20 +129,23 @@ model = ColumnImageConvCPC(
     contexter_params={"num_residual_blocks": 4, "kernel_size": 3},
 ).to(device)
 
-# model_parallel = torch.nn.DataParallel(model, device_ids=devices)
-model_parallel = model
+model_parallel = torch.nn.DataParallel(model, device_ids=devices)
+# model_parallel = model
 wandb.watch(model_parallel)
 
 optimizer = madgrad.MADGRAD(
     model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
 )
-scaler = torch.cuda.amp.GradScaler()
+# scaler = torch.cuda.amp.GradScaler()
 
 # %%
 train_losses = []
 val_losses = []
 
+
 # %%
+
+
 def load_batch(data_loader):
     dataloader_iterator = iter(data_loader)
     while True:
@@ -151,16 +154,16 @@ def load_batch(data_loader):
         except StopIteration:
             dataloader_iterator = iter(data_loader)
             X, _ = next(dataloader_iterator)
-        X = X.to(device, non_blocking=True)
+        # X = X.to(device, non_blocking=True)
         yield X
 
 
 def run_batch(data_generator):
     X = next(data_generator)
 
-    with torch.cuda.amp.autocast():
-        X_emb, X_ctx = model_parallel(X)
-        batch_loss = model.cpc_loss(X_emb, X_ctx)
+    # with torch.cuda.amp.autocast():
+    X_emb, X_ctx = model_parallel(X)
+    batch_loss = model.cpc_loss(X_emb, X_ctx)
 
     return batch_loss
 
@@ -175,10 +178,15 @@ for _ in range(config.num_batches - len(train_losses)):
     with torch.no_grad():
         val_loss = run_batch(val_generator)
 
+    # with torch.autograd.detect_anomaly():
     train_loss = run_batch(train_generator)
-    scaler.scale(train_loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
+    # scaler.scale(train_loss).backward()
+    train_loss.backward()
+    # scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model_parallel.parameters(), config.max_norm)
+    optimizer.step()
+    # scaler.step(optimizer)
+    # scaler.update()
 
     wandb.log({"loss": train_loss, "val_loss": val_loss})
 
@@ -190,6 +198,12 @@ for _ in range(config.num_batches - len(train_losses)):
         + f" => CPC (train): {np.mean(train_losses[-100:]):.3f}"
         + f" => CPC (val): {np.mean(val_losses[-100:]):.3f}"
     )
+
+# %%
+torch.save(
+    (model, optimizer, train_losses, val_losses), config.model_path, pickle_module=cloudpickle
+)
+config.model_path
 
 # %%
 plt.plot(pd.Series(train_losses).rolling(128).mean())
@@ -207,28 +221,27 @@ data_loader = torch.utils.data.DataLoader(
 )
 
 with torch.no_grad():
-    for x, y in data_loader:
-        X = x.to(device, non_blocking=True)
+    for X, y in data_loader:
+        # X = X.to(device, non_blocking=True)
         X_emb, X_ctx = model_parallel(X)
 
         clf_input = X_emb.reshape(X.shape[0], num_timesteps, config.num_embeddings, num_timesteps)
         clf_input = clf_input.transpose(2, 1)
+        clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
         clf_input = clf_input.mean(dim=(2, 3))
+        clf_input = torch.nn.functional.normalize(clf_input, dim=1, p=2)
 
         cpc_reps.append(clf_input.cpu().numpy())
         labels.append(y.cpu().numpy())
 
-cpc_reps = np.concatenate(cpc_reps)
-labels = np.concatenate(labels)
+cpc_reps = np.concatenate(cpc_reps)[::10]
+labels = np.concatenate(labels)[::10]
 
 # %%
 cpc_reps.shape
 
 # %%
-embedding = umap.UMAP(
-    n_components=2,
-    n_jobs=-1,
-).fit_transform(cpc_reps)
+embedding = umap.UMAP(n_components=2, n_jobs=-1, metric="cosine").fit_transform(cpc_reps)
 
 # %%
 fig, ax = plt.subplots(figsize=(12, 6))
@@ -262,6 +275,3 @@ score = sklearn.model_selection.cross_val_score(
 ).mean()
 
 wandb.log({"ROC AUC Score (Linear Classifier)": score})
-
-# %%
-torch.save((model, optimizer, train_losses, val_losses), model_path, pickle_module=cloudpickle)

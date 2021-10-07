@@ -8,8 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import sklearn
+import sklearn.decomposition
 import sklearn.linear_model
 import sklearn.model_selection
+import sklearn.pipeline
+import sklearn.preprocessing
 import torch
 import torchvision
 from fastprogress.fastprogress import force_console_behavior
@@ -30,13 +33,13 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
 devices = list(range(torch.cuda.device_count()))
 device = f"cuda:{devices[0]}"
 batch_size = 16 * len(devices)
-num_accumulated_batches = 8
+num_accumulated_batches = 1
 
 print(batch_size * num_accumulated_batches)
 
 # %%
-videos_path = "/srv/public/benwild/predictive/videos_2019_25000videos_32frames_random.h5"
-model_path = "/srv/data/benwild/data/unsupervised_behaviors/random_video_cpc_20210923.pt"
+videos_path = "/srv/public/benwild/predictive/videos_2019_50000videos_32frames_random.h5"
+model_path = "/srv/data/benwild/data/unsupervised_behaviors/random_video_cpc_20210929.pt"
 
 
 # %%
@@ -44,19 +47,29 @@ data = MaskedVideoDataset(videos_path, ellipse_masked=False)
 mean = data.file["mean"][()]
 std = data.file["std"][()]
 
+"""
+torchvision.transforms.Lambda(lambda images: images.reshape(-1, 128, 128)),
+torchvision.transforms.RandomAffine(
+    degrees=(-25, 25),
+    scale=(0.9, 1.1),
+),
+torchvision.transforms.RandomErasing(),
+torchvision.transforms.Lambda(lambda images: images.reshape(-1, 65, 128, 128)),
+"""
+
 transforms = torchvision.transforms.Compose(
     [
         torchvision.transforms.Lambda(lambda images: torch.from_numpy(images)),
+        torchvision.transforms.Lambda(lambda images: (images - mean) / std),
         torchvision.transforms.Lambda(
             lambda images: torch.nn.functional.interpolate(
                 images, size=(64, 64), mode="bicubic", align_corners=False
             )
         ),
-        torchvision.transforms.Lambda(lambda images: (images - mean) / std),
     ]
 )
 
-data = MaskedVideoDataset(videos_path, ellipse_masked=False, transform=transforms)
+data = MaskedVideoDataset(videos_path, ellipse_masked=False, tag_masked=True, transform=transforms)
 
 plt.imshow(data[0][0][0, 0] * std + mean, cmap=plt.cm.gray, interpolation="bicubic")
 
@@ -67,21 +80,23 @@ train_data, val_data = torch.utils.data.random_split(
 
 # %%
 train_data_loader = torch.utils.data.DataLoader(
-    train_data, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
+    train_data, batch_size=batch_size, shuffle=True, num_workers=12, pin_memory=True
 )
 val_data_loader = torch.utils.data.DataLoader(
-    val_data, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
+    val_data, batch_size=batch_size, shuffle=True, num_workers=12, pin_memory=True
 )
 
 # %%
+num_features = 64
 num_timesteps = data[0][0].shape[1]
+
 pre_convolutions = torch.nn.Sequential(
-    torch.nn.Conv3d(1, 64, padding=0, kernel_size=(1, 7, 7)),
+    torch.nn.Conv3d(1, num_features, padding=0, kernel_size=(1, 7, 7)),
     torch.nn.AvgPool3d((1, 2, 2)),
 )
 model = VideoConvCPC(
     num_channels=1,
-    num_features=64,
+    num_features=num_features,
     num_video_residual_blocks=6,
     num_embeddings=128,
     num_context=128,
@@ -96,13 +111,11 @@ model = VideoConvCPC(
 learning_rate = 0.001
 weight_decay = 1e-5
 
-num_batches = 10000
-
-model_parallel = torch.nn.DataParallel(model, device_ids=devices)
-optimizer = madgrad.MADGRAD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+num_batches = 25000
 
 # %%
-x, _ = next(iter(train_data_loader))
+model_parallel = torch.nn.DataParallel(model, device_ids=devices)
+optimizer = madgrad.MADGRAD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 # %%
 train_losses = []
@@ -180,6 +193,10 @@ plt.plot(pd.Series(val_losses).rolling(128).mean())
 # %%
 torch.save((model, optimizer, train_losses, val_losses), model_path, pickle_module=cloudpickle)
 model_path
+
+# %%
+model, optimizer, train_losses, val_losses = torch.load(model_path)
+model_parallel = torch.nn.DataParallel(model, device_ids=devices)
 
 # %%
 torch.multiprocessing.set_sharing_strategy("file_system")

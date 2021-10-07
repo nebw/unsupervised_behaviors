@@ -44,9 +44,9 @@ bb_behavior.db.set_season_berlin_2019()
 batch_size = 128
 device = "cuda:0"
 
-latents_path = "/srv/data/benwild/data/unsupervised_behaviors/latents--videos_2019_20000videos_32frames_allbehaviors--image_cpc_20210917.pt"
-model_path = "/srv/data/benwild/data/unsupervised_behaviors/cpc_on_cpc_reps_20210921.pt"
-videos_path = "/srv/public/benwild/predictive/videos_2019_20000videos_32frames_allbehaviors.h5"
+latents_path = "/srv/data/benwild/data/unsupervised_behaviors/latents--videos_2019_5000videos_32frames_allbehaviors_fixed--random_image_cpc_20210921.pt"
+model_path = "/srv/data/benwild/data/unsupervised_behaviors/cpc_on_cpc_reps_20210923.pt"
+videos_path = "/srv/public/benwild/predictive/videos_2019_5000videos_32frames_allbehaviors_fixed.h5"
 
 # %%
 with h5py.File(videos_path, "r") as f:
@@ -166,7 +166,7 @@ plt.plot(pd.Series(val_losses).rolling(128).mean())
 
 # %%
 reps = model.get_representations(
-    latents,
+    latents.astype(np.float32),
     batch_size,
     device,
     # aggfunc=lambda ctx: torch.nn.functional.normalize(ctx[:, :, ctx.shape[2] // 2], dim=1, p=2),

@@ -27,14 +27,14 @@ video_manager = bb_behavior.io.videos.BeesbookVideoManager(
 )
 
 # %%
-num_videos_total = 25000
+num_videos_total = 50000
 num_frames_around = 32
 min_proportion_detected = 0.9
 use_clahe = True
 
 output_path = (
     f"/srv/public/benwild/predictive/videos_2019_{num_videos_total}videos_"
-    + f"{num_frames_around}frames_random_fixed.h5"
+    + f"{num_frames_around}frames_random.h5"
 )
 data.create_video_h5(output_path, num_videos_total, num_frames_around)
 

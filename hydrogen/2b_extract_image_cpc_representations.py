@@ -33,8 +33,10 @@ config = DotDict()
 
 
 # %%
-config.videos_path = "/storage/mi/jennyonline/data/videos_2019_10000.h5"
-config.model_path = "/srv/data/benwild/data/unsupervised_behaviors/image_cpc_20210914.pt"
+config.videos_path = (
+    "/srv/public/benwild/predictive/videos_2019_5000videos_32frames_allbehaviors_fixed.h5"
+)
+config.model_path = "/srv/data/benwild/data/unsupervised_behaviors/random_image_cpc_20210921.pt"
 
 # %%
 data = MaskedFrameDataset(config.videos_path)
@@ -72,9 +74,9 @@ config.weight_decay = 1e-5
 
 config.tile_size = 32
 
-devices = (0, 1, 2, 3)
+devices = list(range(torch.cuda.device_count()))
 device = f"cuda:{devices[0]}"
-config.batch_size = 48 * len(devices)
+config.batch_size = 32 * len(devices)
 
 config.num_batches = 20000
 
@@ -131,7 +133,7 @@ labels = np.concatenate(labels)
 cpc_reps.shape
 
 # %%
-cpc_reps = cpc_reps.reshape(-1, 33, config.num_embeddings)
+cpc_reps = cpc_reps.reshape(-1, 32 * 2 + 1, config.num_embeddings)
 cpc_reps.shape
 
 # %%
